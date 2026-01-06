@@ -3,7 +3,11 @@
   "name": "com.scanmalware.mcp/scanmalware-mcp",
   "title": "ScanMalware.com URL Scanner",
   "description": "MCP server for ScanMalware.com URL scanning, malware detection, and analysis.",
-  "version": "0.1.1",
+  "repository": {
+    "url": "https://github.com/scanmalware/mcp-server",
+    "source": "github"
+  },
+  "version": "0.1.2",
   "websiteUrl": "https://mcp.scanmalware.com",
   "remotes": [
     {
