@@ -40,12 +40,25 @@ echo "Creating archive at ${ARCHIVE_PATH}..."
 tar -czf "${ARCHIVE_PATH}" "${EXCLUDES[@]}" -C "${WORKDIR}" .
 
 echo "Uploading to ${TARGET}:${REMOTE_ARCHIVE}..."
-scp "${SCP_OPTS[@]}" "${ARCHIVE_PATH}" "${TARGET}:${REMOTE_ARCHIVE}"
+if [[ ${#SCP_OPTS[@]} -gt 0 ]]; then
+  scp "${SCP_OPTS[@]}" "${ARCHIVE_PATH}" "${TARGET}:${REMOTE_ARCHIVE}"
+else
+  scp "${ARCHIVE_PATH}" "${TARGET}:${REMOTE_ARCHIVE}"
+fi
 
 echo "Running remote redeploy..."
-ssh "${SSH_OPTS[@]}" "${TARGET}" \
-  "if [ ! -x \"${ROOT_DIR}/deploy/redeploy.sh\" ]; then \
-     mkdir -p \"${ROOT_DIR}\"; \
-     tar -xzf \"${REMOTE_ARCHIVE}\" -C \"${ROOT_DIR}\" --no-same-owner; \
-   fi; \
-   bash \"${ROOT_DIR}/deploy/redeploy.sh\" \"${REMOTE_ARCHIVE}\""
+if [[ ${#SSH_OPTS[@]} -gt 0 ]]; then
+  ssh "${SSH_OPTS[@]}" "${TARGET}" \
+    "if [ ! -x \"${ROOT_DIR}/deploy/redeploy.sh\" ]; then \
+       mkdir -p \"${ROOT_DIR}\"; \
+       tar -xzf \"${REMOTE_ARCHIVE}\" -C \"${ROOT_DIR}\" --no-same-owner; \
+     fi; \
+     bash \"${ROOT_DIR}/deploy/redeploy.sh\" \"${REMOTE_ARCHIVE}\""
+else
+  ssh "${TARGET}" \
+    "if [ ! -x \"${ROOT_DIR}/deploy/redeploy.sh\" ]; then \
+       mkdir -p \"${ROOT_DIR}\"; \
+       tar -xzf \"${REMOTE_ARCHIVE}\" -C \"${ROOT_DIR}\" --no-same-owner; \
+     fi; \
+     bash \"${ROOT_DIR}/deploy/redeploy.sh\" \"${REMOTE_ARCHIVE}\""
+fi

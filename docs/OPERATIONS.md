@@ -377,7 +377,7 @@ doctl compute firewall create \
 ## Notes
 
 - Auth-gated endpoints and `/modules/*` tools are removed from the MCP server.
-- Upstream-disabled endpoints are excluded (e.g., `get_improvements`, `find_screenshot_duplicates`).
+- Upstream-disabled endpoints are excluded (e.g., `get_improvements`, `find_screenshot_duplicates`, `get_ai_stats`, `search_js_fingerprinter2_code_hash`, `search_js_segments_by_tlsh`).
 - Some search tools require at least one filter and return a validation error if none are provided.
 - Cloudflare proxying is disabled for `mcp.scanmalware.com`.
 - The MCP server is public; set `MCP_AUTH_TOKEN` if you want to restrict access.
