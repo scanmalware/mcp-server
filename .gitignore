@@ -1,0 +1,7 @@
+/deploy/mitmproxy/state/*
+!/deploy/mitmproxy/state/.gitkeep
+.DS_Store
+.tools/
+.venv/
+__pycache__/
+*.pyc

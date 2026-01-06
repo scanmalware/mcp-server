@@ -1,0 +1,22 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "com.scanmalware.mcp/scanmalware-mcp",
+  "title": "ScanMalware.com URL Scanner",
+  "description": "MCP server for ScanMalware.com URL scanning, malware detection, and analysis.",
+  "version": "0.1.1",
+  "websiteUrl": "https://mcp.scanmalware.com",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://mcp.scanmalware.com/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional Bearer token when MCP_AUTH_TOKEN is set.",
+          "isSecret": true,
+          "placeholder": "Bearer <token>"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,95 @@
+version: "3.8"
+
+services:
+  proxy:
+    image: mitmproxy/mitmproxy:latest
+    volumes:
+      - ./mitmproxy/log_full.py:/etc/mitmproxy/log_full.py:ro
+      - ./mitmproxy/state:/home/mitmproxy/.mitmproxy
+      - ../logs/mitmproxy:/var/log/mitmproxy
+    environment:
+      MITMPROXY_FULL_LOG: /var/log/mitmproxy/full.log
+    command:
+      - mitmdump
+      - --listen-host
+      - 0.0.0.0
+      - --listen-port
+      - "3128"
+      - --mode
+      - regular
+      - --allow-hosts
+      - "(^|\\.)scanmalware\\.com:"
+      - --set
+      - store_streamed_bodies=true
+      - -s
+      - /etc/mitmproxy/log_full.py
+    networks:
+      scanmalware_net:
+        ipv4_address: 172.28.0.11
+    restart: unless-stopped
+
+  mcp:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8000"
+      PYTHONPATH: "/app"
+      SCANMALWARE_BASE_URL: "${SCANMALWARE_BASE_URL:-https://scanmalware.com}"
+      SCANMALWARE_TIMEOUT_S: "${SCANMALWARE_TIMEOUT_S:-30}"
+      SCANMALWARE_MAX_DOWNLOAD_BYTES: "${SCANMALWARE_MAX_DOWNLOAD_BYTES:-10485760}"
+      SCANMALWARE_ALLOW_HTTP: "${SCANMALWARE_ALLOW_HTTP:-false}"
+      SCANMALWARE_ALLOW_PRIVATE_TARGETS: "${SCANMALWARE_ALLOW_PRIVATE_TARGETS:-false}"
+      SCANMALWARE_PROXY_URL: "${SCANMALWARE_PROXY_URL:-http://172.28.0.11:3128}"
+      SCANMALWARE_CA_CERT: "${SCANMALWARE_CA_CERT:-/etc/scanmalware-certs/mitmproxy-ca-cert.pem}"
+      SCANMALWARE_LOG_FILE: "${SCANMALWARE_LOG_FILE:-/var/log/scanmalware-mcp/mcp.log}"
+      SCANMALWARE_LOG_MAX_BYTES: "${SCANMALWARE_LOG_MAX_BYTES:-10485760}"
+      SCANMALWARE_LOG_BACKUP_COUNT: "${SCANMALWARE_LOG_BACKUP_COUNT:-7}"
+      SCANMALWARE_FULL_LOG_FILE: "${SCANMALWARE_FULL_LOG_FILE:-/var/log/scanmalware-mcp/mcp-full.log}"
+      SCANMALWARE_FULL_LOG_MAX_BYTES: "${SCANMALWARE_FULL_LOG_MAX_BYTES:-10485760}"
+      SCANMALWARE_FULL_LOG_BACKUP_COUNT: "${SCANMALWARE_FULL_LOG_BACKUP_COUNT:-7}"
+      SCANMALWARE_MCP_HTTP_LOG_FILE: "${SCANMALWARE_MCP_HTTP_LOG_FILE:-/var/log/scanmalware-mcp/mcp-http.log}"
+      SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES: "${SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES:-10485760}"
+      SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT: "${SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT:-7}"
+      SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES: "${SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES:-1048576}"
+      # Optional auth for ScanMalware endpoints.
+      SCANMALWARE_BEARER_TOKEN: "${SCANMALWARE_BEARER_TOKEN:-}"
+      # Optional auth for the MCP server itself.
+      MCP_AUTH_TOKEN: "${MCP_AUTH_TOKEN:-}"
+      MCP_RESOURCE_SERVER_URL: "${MCP_RESOURCE_SERVER_URL:-}"
+      MCP_ISSUER_URL: "${MCP_ISSUER_URL:-}"
+    volumes:
+      - ./mitmproxy/state:/etc/scanmalware-certs:ro
+      - ../scanmalware_mcp:/app/scanmalware_mcp:ro
+      - ../logs/mcp:/var/log/scanmalware-mcp
+    expose:
+      - "8000"
+    networks:
+      scanmalware_net:
+        ipv4_address: 172.28.0.10
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - mcp
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/html:/usr/share/nginx/html:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ../logs/nginx:/var/log/nginx
+    networks:
+      scanmalware_net:
+        ipv4_address: 172.28.0.12
+    restart: unless-stopped
+
+networks:
+  scanmalware_net:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24

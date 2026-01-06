@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ScanMalware MCP</title>
+    <style>
+      :root {
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        font-family: "Space Grotesk", "Trebuchet MS", Arial, sans-serif;
+        background: linear-gradient(135deg, #f5f7ff, #fef6e4);
+        color: #0f172a;
+      }
+      main {
+        max-width: 720px;
+        margin: 8vh auto;
+        padding: 32px;
+        background: rgba(255, 255, 255, 0.9);
+        border-radius: 20px;
+        box-shadow: 0 24px 60px rgba(15, 23, 42, 0.12);
+      }
+      h1 {
+        font-size: 2.5rem;
+        margin: 0 0 12px;
+      }
+      p {
+        line-height: 1.5;
+        margin: 0 0 16px;
+      }
+      code {
+        display: inline-block;
+        padding: 4px 8px;
+        background: #0f172a;
+        color: #f8fafc;
+        border-radius: 8px;
+      }
+      a {
+        color: #2563eb;
+        text-decoration: none;
+      }
+      a:hover,
+      a:focus-visible {
+        text-decoration: underline;
+      }
+      .hint {
+        font-size: 0.95rem;
+        color: #475569;
+      }
+    </style>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet" />
+  </head>
+  <body>
+    <main>
+      <h1>ScanMalware MCP</h1>
+      <p>
+        This server fronts the ScanMalware MCP tools and resources for
+        <a href="https://scanmalware.com" rel="noopener">scanmalware.com</a>.
+      </p>
+      <p>
+        MCP endpoint:
+        <code>/mcp</code>
+      </p>
+      <p class="hint">
+        Use this URL in your MCP client: <code>https://mcp.scanmalware.com/mcp</code>
+      </p>
+    </main>
+  </body>
+</html>
