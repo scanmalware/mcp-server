@@ -52,6 +52,8 @@ MCP server security env vars:
 - `MCP_AUTH_TOKEN` (if set, HTTP transports require `Authorization: Bearer <token>`)
 - `MCP_RESOURCE_SERVER_URL` / `MCP_ISSUER_URL` (optional; only used when `MCP_AUTH_TOKEN` is set)
 
+Tool note: `submit_scan` supports `csrf=true` to fetch a CSRF token internally; there is no separate `get_csrf_token` tool.
+
 ## Example prompts
 
 Phishing triage (submit → wait → summarize):
@@ -84,12 +86,12 @@ The deploy bundle lives in `deploy/` and runs two containers:
 - `doctl` authenticated (`doctl auth init`)
 - SSH key uploaded to DigitalOcean (used by `doctl compute droplet create`)
 
-### Create a smallest droplet in Germany (Frankfurt)
+### Create a small droplet in Germany (Frankfurt)
 
 ```bash
 DROPLET_NAME=scanmalware-mcp-small
 REGION=fra1
-SIZE=s-1vcpu-512mb-10gb
+SIZE=s-1vcpu-2gb
 IMAGE=debian-12-x64
 SSH_KEYS=$(doctl compute ssh-key list --format ID --no-header | paste -sd, -)
 

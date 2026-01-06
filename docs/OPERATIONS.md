@@ -7,7 +7,7 @@ This document describes the current DigitalOcean deployment, how to connect to t
 - Domain: `mcp.scanmalware.com`
 - Public IP: `64.227.123.54`
 - Region: `fra1` (Frankfurt)
-- Droplet size: `s-1vcpu-512mb-10gb`
+- Droplet size: `s-1vcpu-2gb`
 - OS image: `debian-12-x64`
 - Containers (docker-compose):
   - `mcp` (ScanMalware MCP server, streamable HTTP on port 8000)
@@ -55,6 +55,7 @@ certbot renew
 
 - MCP endpoint: `https://mcp.scanmalware.com/mcp`
 - The HTTP transport requires `Accept: application/json, text/event-stream`.
+- `submit_scan` supports `csrf=true` to fetch a CSRF token internally (no separate `get_csrf_token` tool).
 
 Minimal smoke test:
 
