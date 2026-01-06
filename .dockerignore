@@ -12,4 +12,4 @@ build
 .DS_Store
 .git
 .gitignore
-
+logs
