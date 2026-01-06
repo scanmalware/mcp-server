@@ -222,8 +222,10 @@ Two common flows:
 tar --exclude=.git --exclude=.venv --exclude=__pycache__ -czf /tmp/scanmalware-mcp.tar.gz -C . .
 scp -i /path/to/key /tmp/scanmalware-mcp.tar.gz root@<droplet-ip>:/tmp/
 ssh -i /path/to/key root@<droplet-ip> \
-  "tar -xzf /tmp/scanmalware-mcp.tar.gz -C /opt/scanmalware-mcp && cd /opt/scanmalware-mcp && docker-compose -f deploy/docker-compose.yml up -d --build"
+  "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
+The redeploy script stops containers before swapping files to avoid bind-mount inode issues.
+If the script is not on the droplet yet, run the legacy tar + docker-compose command once to install it.
 
 2) Rolling deploy (new droplet)
 - Create a new droplet (steps above)
