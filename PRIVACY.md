@@ -45,5 +45,5 @@ Your Choices
 - If you have questions or requests about data handling, contact us.
 
 Contact
+- Contact form: https://scanmalware.com/contact
 - GitHub issues: https://github.com/scanmalware/mcp-server/issues
-- Website: https://scanmalware.com
