@@ -331,6 +331,11 @@ ssh -i ~/.ssh/id_ed25519 root@64.227.123.54 \
 The redeploy script stops containers before swapping files to avoid bind-mount inode issues.
 If the script is not on the droplet yet, run the legacy tar + docker-compose command once to install it.
 
+Optional one-shot helper from the repo root:
+```bash
+./deploy/push-redeploy.sh root@64.227.123.54 ~/.ssh/id_ed25519
+```
+
 Rolling deploy (new droplet):
 1) Create a new droplet (same region/size/OS)
 2) Deploy the same bundle
