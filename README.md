@@ -52,6 +52,27 @@ MCP server security env vars:
 - `MCP_AUTH_TOKEN` (if set, HTTP transports require `Authorization: Bearer <token>`)
 - `MCP_RESOURCE_SERVER_URL` / `MCP_ISSUER_URL` (optional; only used when `MCP_AUTH_TOKEN` is set)
 
+## Example prompts
+
+Phishing triage (submit → wait → summarize):
+```text
+Submit a scan for https://example-login-update.com, wait for completion, and
+return status, risk_score, and the top indicators. If high risk, include the
+AI analysis and screenshot resource.
+```
+
+Brand abuse monitoring:
+```text
+Search scans for "acme login" (limit 5). For each result, list scan_id,
+status, risk_score, and URL. Highlight anything marked high risk.
+```
+
+TLS/certificate inspection:
+```text
+For scan_id 1234...abcd, fetch TLS details and the certificate PEM download.
+Summarize issuer, subject, validity dates, and SANs; flag mismatches.
+```
+
 ## Deploy to DigitalOcean (Debian + Docker + Nginx)
 
 The deploy bundle lives in `deploy/` and runs two containers:
