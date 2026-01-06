@@ -53,6 +53,8 @@ MCP server security env vars:
 - `MCP_RESOURCE_SERVER_URL` / `MCP_ISSUER_URL` (optional; only used when `MCP_AUTH_TOKEN` is set)
 
 Tool note: `submit_scan` supports `csrf=true` to fetch a CSRF token internally; there is no separate `get_csrf_token` tool.
+Tool note: some upstream endpoints are disabled and excluded from the tool list (e.g., `get_improvements`, `find_screenshot_duplicates`).
+Some search tools require at least one filter and will raise a validation error if none are provided.
 
 ## Example prompts
 
