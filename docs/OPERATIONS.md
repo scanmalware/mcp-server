@@ -340,7 +340,7 @@ Rolling deploy (new droplet):
 ```bash
 DROPLET_NAME=scanmalware-mcp-small
 REGION=fra1
-SIZE=s-1vcpu-512mb-10gb
+SIZE=s-1vcpu-2gb
 IMAGE=debian-12-x64
 SSH_KEYS=$(doctl compute ssh-key list --format ID --no-header | paste -sd, -)
 

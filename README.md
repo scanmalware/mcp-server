@@ -139,11 +139,11 @@ ssh -i /path/to/key root@<droplet-ip> \
 ### Verify
 
 ```bash
-curl -I http://<droplet-ip>/
-curl -I http://<droplet-ip>/mcp
+curl -I https://mcp.scanmalware.com/
+curl -I https://mcp.scanmalware.com/mcp
 ```
 
-`/` should return 200 from Nginx. `/mcp` returns 405 on GET, which is expected for the MCP endpoint.
+`/` should return 200 from Nginx. `/mcp` returns 406 on GET without MCP Accept headers, which is expected.
 
 ### Smoke test (MCP initialize + tools/list)
 
