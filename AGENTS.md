@@ -42,17 +42,15 @@ Recommended env vars (never hardcode secrets):
 
 ## Core scan workflow (API-level)
 
-1. (Optional) `GET /api/v1/csrf-token` → `{ token, expires_at }`
-2. `POST /api/v1/scan` with JSON body:
+1. `POST /api/v1/scan` with JSON body:
    - `url` (required)
    - `scan_type` (default `"public"`)
    - `options` (object, optional)
-   - `csrf_token` (optional)
-   - Optional headers: `x-csrf-token`, `User-Agent`
-3. Poll for completion:
+   - Optional headers: `User-Agent`
+2. Poll for completion:
    - `GET /api/v1/scan/{scan_id}/summary` (compact; includes `status`, `risk_score`, counts)
    - and/or `GET /api/v1/result/{scan_id}/progress`
-4. Fetch details:
+3. Fetch details:
    - `GET /api/v1/result/{scan_id}`
    - plus specialized endpoints (`/ai/{scan_id}`, `/tls/{scan_id}`, `/technologies/by-scan/{scan_id}`, etc.)
 
@@ -69,7 +67,7 @@ Keep the exposed tool surface area curated (the API is large):
 
 Suggested initial tool set (public-only MVP):
 
-- `submit_scan(url, scan_type="public", options=None, user_agent=None, csrf=False)`
+- `submit_scan(url, scan_type="public", options=None, user_agent=None)`
 - `wait_for_scan(scan_id, timeout_s=..., poll_interval_s=...)`
 - `get_scan_summary(scan_id)`
 - `get_scan_result(scan_id)`

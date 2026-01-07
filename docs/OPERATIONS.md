@@ -55,7 +55,7 @@ certbot renew
 
 - MCP endpoint: `https://mcp.scanmalware.com/mcp`
 - The HTTP transport requires `Accept: application/json, text/event-stream`.
-- `submit_scan` supports `csrf=true` to fetch a CSRF token internally (no separate `get_csrf_token` tool).
+- `submit_scan` does not call `/api/v1/csrf-token` (no CSRF token tool).
 
 Minimal smoke test:
 
