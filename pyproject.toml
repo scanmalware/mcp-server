@@ -7,7 +7,11 @@ name = "scanmalware-mcp"
 version = "0.1.6"
 description = "An MCP server for the ScanMalware.com API"
 readme = "README.md"
+license = { file = "LICENSE.md" }
 requires-python = ">=3.10"
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+]
 dependencies = [
   "mcp>=1.14.0",
 ]
