@@ -52,6 +52,10 @@ MCP server security env vars:
 - `MCP_AUTH_TOKEN` (if set, HTTP transports require `Authorization: Bearer <token>`)
 - `MCP_RESOURCE_SERVER_URL` / `MCP_ISSUER_URL` (optional; only used when `MCP_AUTH_TOKEN` is set)
 
+Transport note: the HTTP transports run stateless (`stateless_http=True`), so responses carry
+no `mcp-session-id` header. Clients must not require one. This keeps per-session state -
+and therefore memory - flat.
+
 Tool note: `submit_scan` does not call `/api/v1/csrf-token`; there is no CSRF token tool.
 Tool note: some upstream endpoints are disabled and excluded from the tool list (e.g., `get_improvements`, `find_screenshot_duplicates`, `get_ai_stats`, `search_js_fingerprinter2_code_hash`, `search_js_segments_by_tlsh`).
 Some search tools require at least one filter and will raise a validation error if none are provided.
