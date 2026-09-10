@@ -5,7 +5,6 @@ This document describes the current DigitalOcean deployment, how to connect to t
 ## Current deployment
 
 - Domain: `mcp.scanmalware.com`
-- Public IP: `64.227.123.54`
 - Region: `fra1` (Frankfurt)
 - Droplet size: `s-1vcpu-2gb`
 - OS image: `debian-12-x64`
@@ -16,14 +15,30 @@ This document describes the current DigitalOcean deployment, how to connect to t
 
 ## Connect to the DigitalOcean instance
 
+This runbook is public, so it does not hardcode the droplet address or a key
+path. Resolve them once per shell and reuse `mcpssh` in the commands below.
+
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@64.227.123.54
+# Look the droplet up by tag rather than pinning its IP here.
+export MCP_HOST="$(doctl compute droplet list --tag-name scanmalware-mcp \
+  --format PublicIPv4 --no-header | head -1)"
+export MCP_SSH_KEY="${MCP_SSH_KEY:-$HOME/.ssh/id_ed25519}"
+
+# A function, not a variable: zsh does not word-split an unquoted "$VAR" used
+# as a command, so stashing the whole ssh invocation in a variable breaks there.
+# A function works in bash and zsh alike, and accepts heredocs.
+mcpssh() { ssh -i "$MCP_SSH_KEY" "root@$MCP_HOST" "$@"; }
+
+mcpssh 'hostname; uptime'
 ```
 
-If you need to discover the droplet IP:
+Nicer still, put it in `~/.ssh/config` (untracked) and just use `ssh scanmalware-mcp`:
 
-```bash
-doctl compute droplet list --tag-name scanmalware-mcp
+```
+Host scanmalware-mcp
+  HostName <droplet-ip>
+  User root
+  IdentityFile ~/.ssh/id_ed25519
 ```
 
 ## Services and paths
@@ -206,21 +221,21 @@ Components:
 Apply the firewall rules (idempotent):
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@64.227.123.54 \
+mcpssh \
   "bash /opt/scanmalware-mcp/deploy/iptables/lock-egress.sh"
 ```
 
 Persist the rules across reboot:
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@64.227.123.54 \
+mcpssh \
   "iptables-save > /etc/iptables/rules.v4"
 ```
 
 Verify egress is locked to the proxy:
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@64.227.123.54 <<'SH'
+mcpssh <<'SH'
 docker exec -i deploy_mcp_1 python - <<'PY'
 import httpx
 
@@ -263,7 +278,7 @@ CA via `SCANMALWARE_CA_CERT`.
 Generate the CA on the droplet and restart the stack:
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@64.227.123.54 <<'SH'
+mcpssh <<'SH'
 set -euo pipefail
 cd /opt/scanmalware-mcp
 
@@ -293,7 +308,7 @@ via `SCANMALWARE_CA_CERT` so it trusts the bumped certificates.
 ## Popularity reporting (example)
 
 ```bash
-ssh -i ~/.ssh/id_ed25519 root@64.227.123.54 <<'SH'
+mcpssh <<'SH'
 python3 - <<'PY'
 import json
 from collections import Counter
@@ -367,8 +382,8 @@ In-place update on the existing droplet:
 
 ```bash
 tar --exclude=.git --exclude=.venv --exclude=__pycache__ -czf /tmp/scanmalware-mcp.tar.gz -C . .
-scp -i ~/.ssh/id_ed25519 /tmp/scanmalware-mcp.tar.gz root@64.227.123.54:/tmp/
-ssh -i ~/.ssh/id_ed25519 root@64.227.123.54 \
+scp -i "$MCP_SSH_KEY" /tmp/scanmalware-mcp.tar.gz "root@$MCP_HOST:/tmp/"
+mcpssh \
   "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
 The redeploy script stops containers before swapping files to avoid bind-mount inode issues.
@@ -376,7 +391,7 @@ If the script is not on the droplet yet, run the legacy tar + docker-compose com
 
 Optional one-shot helper from the repo root:
 ```bash
-./deploy/push-redeploy.sh root@64.227.123.54 ~/.ssh/id_ed25519
+./deploy/push-redeploy.sh "root@$MCP_HOST" "$MCP_SSH_KEY"
 ```
 
 Rolling deploy (new droplet):
