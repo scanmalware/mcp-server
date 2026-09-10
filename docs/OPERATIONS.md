@@ -78,29 +78,34 @@ init_payload = {
     },
 }
 
+
+def extract_sse_data(text: str) -> dict:
+    for line in text.splitlines():
+        if line.startswith("data: "):
+            return json.loads(line[len("data: "):])
+    raise ValueError("No SSE data line found")
+
+
 with httpx.Client(timeout=10) as client:
     init_resp = client.post(URL, headers=HEADERS, json=init_payload)
     init_resp.raise_for_status()
-    session_id = init_resp.headers.get("mcp-session-id")
 
-    def extract_sse_data(text: str) -> dict:
-        for line in text.splitlines():
-            if line.startswith("data: "):
-                return json.loads(line[len("data: "):])
-        raise ValueError("No SSE data line found")
+    # The server runs stateless_http=True, so it returns no mcp-session-id.
+    # Only send the header when one is present, so this works either way.
+    session_id = init_resp.headers.get("mcp-session-id")
 
     init_message = extract_sse_data(init_resp.text)
     protocol_version = init_message["result"]["protocolVersion"]
 
-    client.post(
-        URL,
-        headers={**HEADERS, "mcp-session-id": session_id, "mcp-protocol-version": protocol_version},
-        json={"jsonrpc": "2.0", "method": "notifications/initialized"},
-    )
+    headers = {**HEADERS, "mcp-protocol-version": protocol_version}
+    if session_id:
+        headers["mcp-session-id"] = session_id
+
+    client.post(URL, headers=headers, json={"jsonrpc": "2.0", "method": "notifications/initialized"})
 
     tools_resp = client.post(
         URL,
-        headers={**HEADERS, "mcp-session-id": session_id, "mcp-protocol-version": protocol_version},
+        headers=headers,
         json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
     )
     tools_resp.raise_for_status()
@@ -108,9 +113,31 @@ with httpx.Client(timeout=10) as client:
     tool_names = [tool["name"] for tool in tools_message["result"]["tools"]]
 
 print("protocol_version:", protocol_version)
+print("session_id:", session_id or "(none - stateless)")
 print("tool_count:", len(tool_names))
 PY
 ```
+
+## Transport mode (stateless)
+
+The server is built with `stateless_http=True`, so:
+
+- responses carry **no `mcp-session-id`** header, and clients must not require one;
+- no per-session transport is retained, which is what keeps memory flat.
+
+This was a deliberate change. In stateful mode the SDK's session manager never
+evicts from `_server_instances`, so every session leaked a
+`StreamableHTTPServerTransport` + `ServerSession` (~77 KB) for the life of the
+process. Measured over 600 sessions: stateful grew ~41 MB and kept climbing,
+stateless stayed flat at ~75 MB RSS. The server sends no server-initiated
+notifications, so it gives up nothing it actually used.
+
+## Dependency pinning
+
+`mcp` is pinned `>=1.14.0,<2`. mcp 2.x renamed `FastMCP` to `MCPServer` and this
+server does not import under it - a rebuild that picked up 2.x would produce a
+container that crashes on startup. `httpx` is declared explicitly because mcp 2.x
+switched to `httpx2`, so it can no longer be relied on transitively.
 
 ## Logs (persistent)
 
@@ -126,6 +153,22 @@ Two files are persisted on the host and survive redeploys:
 Rotation (defaults): 10MB max, 7 backups. Controlled by:
 - `SCANMALWARE_LOG_FILE`, `SCANMALWARE_LOG_MAX_BYTES`, `SCANMALWARE_LOG_BACKUP_COUNT`
 - `SCANMALWARE_FULL_LOG_FILE`, `SCANMALWARE_FULL_LOG_MAX_BYTES`, `SCANMALWARE_FULL_LOG_BACKUP_COUNT`
+
+Two events describe process and session lifecycle:
+
+- `mcp.startup` fires **once per process**, when the shared ScanMalware HTTP
+  client is built. It carries the resolved config (base URL, proxy, CA cert).
+- `mcp.session.open` fires **once per MCP session**.
+
+Count sessions per day with `mcp.session.open`:
+
+```bash
+grep -c 'mcp.session.open' /opt/scanmalware-mcp/logs/mcp/mcp.log
+```
+
+Note: before the shared-client change, `mcp.startup` fired per session, so in
+logs rotated out from before that change it is the session counter instead. A
+rising `mcp.startup` count in a current log means the process is restarting.
 
 ### MCP raw HTTP logs
 
