@@ -147,6 +147,16 @@ process. Measured over 600 sessions: stateful grew ~41 MB and kept climbing,
 stateless stayed flat at ~75 MB RSS. The server sends no server-initiated
 notifications, so it gives up nothing it actually used.
 
+## Client attribution in logs
+
+`stateless_http=True` means the `initialize` params are not carried across
+requests, so `client_name` and `client_version` are `null` on `mcp.tool.start`
+events. Tool events therefore also log `user_agent`, taken from the HTTP header,
+which does survive. Group usage by `user_agent`; the popularity example above
+does this already.
+
+The raw `mcp-http.log` still records full request headers either way.
+
 ## Dependency pinning
 
 `mcp` is pinned `>=1.14.0,<2`. mcp 2.x renamed `FastMCP` to `MCPServer` and this
@@ -333,10 +343,17 @@ with open(log_path, 'r', encoding='utf-8') as fh:
             tool = data.get('tool')
             if tool:
                 tool_counts[tool] += 1
-            name = data.get('client_name')
-            version = data.get('client_version')
-            if name and version:
-                client_pairs[f"{name}/{version}"] += 1
+            # client_name/client_version are null under stateless_http: the
+            # initialize params are not retained across requests. Group by the
+            # User-Agent header instead, which is logged on every tool call.
+            agent = data.get('user_agent')
+            if agent:
+                client_pairs[agent] += 1
+            else:
+                name = data.get('client_name')
+                version = data.get('client_version')
+                if name and version:
+                    client_pairs[f"{name}/{version}"] += 1
 
 print('top_tools:', tool_counts.most_common(10))
 print('top_clients:', client_pairs.most_common(10))
