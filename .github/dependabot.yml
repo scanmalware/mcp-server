@@ -7,12 +7,21 @@ updates:
       - /deploy/mitmproxy
     schedule:
       interval: weekly
+    ignore:
+      # Release-line migrations need a separate compatibility review.
+      - dependency-name: python
+        update-types: [version-update:semver-major, version-update:semver-minor]
+      - dependency-name: nginx
+        update-types: [version-update:semver-major, version-update:semver-minor]
   - package-ecosystem: pip
     directories:
       - /
       - /deploy/mitmproxy
     schedule:
       interval: weekly
+    ignore:
+      - dependency-name: mcp
+        update-types: [version-update:semver-major]
   - package-ecosystem: github-actions
     directory: /
     schedule:
