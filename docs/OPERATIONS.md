@@ -8,10 +8,10 @@ This document describes the current DigitalOcean deployment, how to connect to t
 - Region: `fra1` (Frankfurt)
 - Droplet size: `s-1vcpu-2gb`
 - OS image: `debian-12-x64`
-- Containers (docker-compose):
+- Containers (Docker Compose plugin):
   - `mcp` (ScanMalware MCP server, streamable HTTP on port 8000)
   - `nginx` (frontend on 80/443, proxies `/mcp` to `mcp:8000`)
-  - `proxy` (mitmproxy with ScanMalware allowlist + full HTTP logging)
+  - `proxy` (mitmproxy with ScanMalware destination checks + full HTTP logging)
 
 ## Connect to the DigitalOcean instance
 
@@ -140,10 +140,11 @@ The server is built with `stateless_http=True`, so:
 - responses carry **no `mcp-session-id`** header, and clients must not require one;
 - no per-session transport is retained, which is what keeps memory flat.
 
-This was a deliberate change. In stateful mode the SDK's session manager never
-evicts from `_server_instances`, so every session leaked a
+This was a deliberate change. With the old SDK, stateful mode never evicted entries from `_server_instances`,
+so every session leaked a
 `StreamableHTTPServerTransport` + `ServerSession` (~77 KB) for the life of the
-process. Measured over 600 sessions: stateful grew ~41 MB and kept climbing,
+process. MCP 1.30.0 adds session reclamation, but this server continues to use
+stateless mode. Measured with the old SDK over 600 sessions: stateful grew ~41 MB and kept climbing,
 stateless stayed flat at ~75 MB RSS. The server sends no server-initiated
 notifications, so it gives up nothing it actually used.
 
@@ -159,10 +160,72 @@ The raw `mcp-http.log` still records full request headers either way.
 
 ## Dependency pinning
 
-`mcp` is pinned `>=1.14.0,<2`. mcp 2.x renamed `FastMCP` to `MCPServer` and this
+`mcp` is constrained to `>=1.30.0,<2`, with the production dependency graph
+pinned by version and hash in `requirements.lock`. mcp 2.x renamed `FastMCP` to `MCPServer` and this
 server does not import under it - a rebuild that picked up 2.x would produce a
 container that crashes on startup. `httpx` is declared explicitly because mcp 2.x
 switched to `httpx2`, so it can no longer be relied on transitively.
+
+## Security maintenance
+
+The 2026-10-02 maintenance release uses Docker Engine 29.8.2 from Docker's
+signed Debian repository, the Compose plugin, Python 3.14.8, MCP 1.30.0 and
+Nginx 1.30.5. Host Debian security updates remain automatic. Container image
+contents require a separate rebuild and deployment; restarting does not patch them.
+
+Python and Nginx base images are pinned by digest. Each build applies available
+OS package updates. MCP and proxy Python dependencies are installed from hashed
+lock files, checked for consistency, and pip is removed from runtime images.
+MCP still runs as UID 10001. Container names are explicit so certificate renewal
+and log-rotation hooks remain valid with the Compose plugin.
+
+Refresh the locks, then review the resulting versions and advisories:
+
+```bash
+uv pip compile pyproject.toml requirements-build.in --python-version 3.14 \
+  --python-platform x86_64-unknown-linux-gnu --generate-hashes --upgrade \
+  --output-file requirements.lock
+uv pip compile deploy/mitmproxy/requirements.in --python-version 3.14 \
+  --python-platform x86_64-unknown-linux-gnu --generate-hashes --upgrade \
+  --output-file deploy/mitmproxy/requirements.lock
+uv run --no-project --with pip-audit pip-audit --no-deps --disable-pip -r requirements.lock
+uv run --no-project --with pip-audit pip-audit --no-deps --disable-pip -r deploy/mitmproxy/requirements.lock
+```
+
+The GitHub security-maintenance workflow rebuilds images and runs dependency
+checks and tests on pushes, pull requests, manual runs and the first of each
+month. Dependabot checks base images and dependencies weekly. These checks do
+not deploy to production; the workflow becomes active when committed to the
+repository's default branch.
+
+Before a runtime upgrade or reboot, retain a droplet snapshot, the private
+configuration/CA backup and previous images. Build and test candidates first.
+After deployment, verify tools/list (128 tools), API requests, both proxy
+protocol guards, direct-egress restrictions, certificate renewal and rotation.
+The Docker startup drop-in reapplies egress restrictions before containers start.
+Keep the previous snapshot until the new deployment has been observed healthy.
+
+### Remaining upstream advisories
+
+The MCP Python dependency lock has no known findings in the maintenance audit.
+This is not a claim that all container OS packages are vulnerability-free:
+Debian still lists findings without a released distribution fix.
+
+mitmproxy 12.2.3 caps four libraries below available security fixes:
+
+| Library | Locked version | Remaining scope / action |
+| --- | --- | --- |
+| cryptography | 48.0.1 | Certificate-verifier and PKCS7 advisories; follow the upstream compatibility update. |
+| h2 | 4.3.0 | HTTP/2 is disabled in this deployment. |
+| msgpack | 1.1.2 | Unpacker error handling; no untrusted flow archives are loaded by the service. |
+| tornado | 6.5.5 | HTTP/websocket/UI advisories; mitmweb and Tornado server/client features are not enabled here. |
+
+These remain open package findings. The audit step reports each match and uses
+`deploy/mitmproxy/audit-baseline.json` to fail on new advisories, changed package
+versions, or an overdue review (2026-11-02). Do not override upstream dependency bounds just to make the
+audit green; test a compatible upstream release when one becomes available.
+The proxy was rebuilt on current Python/OS packages and its compatible
+cryptography, HPACK and ASN.1 updates were applied.
 
 ## Logs (persistent)
 
@@ -218,6 +281,63 @@ The access log includes client IPs and MCP session IDs.
   - JSON lines with full request/response headers and bodies (base64).
   - Bodies may be compressed (see `content-encoding` header).
 
+### Rotation and retention
+
+Docker stdout/stderr logs use the `json-file` driver with `max-size=10m`,
+`max-file=5`, and compression for all three services. Recreate containers after
+changing these settings; a restart does not apply new logging options. See the
+[Docker logging documentation](https://docs.docker.com/engine/logging/drivers/json-file/).
+Archive existing output with `docker logs --timestamps` before recreation if
+it needs to be retained. Do not truncate Docker's internal log files.
+
+Install the host rotation policy once on the standard `/opt/scanmalware-mcp`
+deployment (the installer and policy assume the default `deploy_*_1` names):
+
+```bash
+apt-get update
+apt-get install -y logrotate
+bash /opt/scanmalware-mcp/deploy/logrotate/install.sh
+```
+
+The dedicated `scanmalware-logrotate.timer` checks hourly. Nginx access/error
+logs and the proxy's `full.log` rotate daily or at 100 MiB, retaining 14 archives
+per file with delayed compression. The active file can exceed 100 MiB between
+checks; pre-existing oversized files remain in the archives until aged out.
+The policy lives at `/etc/scanmalware-mcp/logrotate.conf` with its own state file,
+outside the distribution's `/etc/logrotate.d` policy set.
+
+Nginx receives `USR1` after a rename to reopen its logs. The proxy addon opens
+and closes its file for each event and recreates it on the next write. Neither
+uses `copytruncate`. See [Nginx log rotation](https://nginx.org/en/docs/control.html).
+
+MCP application, full-result, and raw HTTP logs continue using Python rotation.
+The Compose deployment retains 63 raw HTTP backups plus the active file at
+10 MiB each (about 640 MiB, roughly a week at the observed traffic rate).
+The standalone server and other MCP log streams retain their existing defaults.
+Rotation limits are volume-based, so they do not guarantee a fixed history window.
+
+Verify the installed configuration and timer:
+
+```bash
+logrotate --debug --state /dev/null /etc/scanmalware-mcp/logrotate.conf
+systemctl list-timers scanmalware-logrotate.timer
+systemctl status scanmalware-logrotate.service --no-pager
+```
+
+### Slow upstream queries
+
+`get_favicon_stats` and `search_ocr` use `SCANMALWARE_SLOW_QUERY_TIMEOUT_S`
+(default 90 seconds). Live favicon aggregation took 57 seconds and successful
+OCR searches typically took 24–30 seconds, exceeding or approaching the normal
+30-second timeout. Other tools continue using `SCANMALWARE_TIMEOUT_S`.
+These calls are not automatically retried, avoiding duplicate expensive queries.
+This accommodates observed latency; database/query optimization belongs upstream.
+
+The upstream library inventory identifies Next.js as `nextjs`. The display name
+`next.js` at the end of the library route produces an HTML frontend 404, while
+`nextjs` returns API JSON. `search_js_fingerprint_by_library` maps this specific
+display-name alias to `nextjs` without changing its filters or pagination.
+
 ## Egress restriction (ScanMalware-only)
 
 The MCP container is forced to use a local mitmproxy and is firewalled so it can only reach that proxy.
@@ -225,7 +345,12 @@ The proxy only allows traffic to `scanmalware.com` (and subdomains).
 
 Components:
 - `SCANMALWARE_PROXY_URL` is set to `http://172.28.0.11:3128` in `deploy/docker-compose.yml`.
-- mitmproxy `--allow-hosts` is set to `(^|\\.)scanmalware\\.com:` to allow the domain and subdomains.
+- `deploy/mitmproxy/restrict_hosts.py` rejects other destinations before CONNECT
+  or HTTP forwarding. Only ScanMalware hostnames on web ports are allowed.
+- `connection_strategy=lazy` delays upstream connections until the checks run.
+- `allow_hosts` is deliberately not used as access control: it only selects which
+  TLS connections are intercepted; other connections can pass through.
+- HTTP/2 and HTTP/3 are disabled; the API connection uses HTTP/1.1.
 - Host firewall rules restrict the MCP container’s egress to the proxy IP.
 
 Apply the firewall rules (idempotent):
@@ -235,11 +360,14 @@ mcpssh \
   "bash /opt/scanmalware-mcp/deploy/iptables/lock-egress.sh"
 ```
 
-Persist the rules across reboot:
+Install the Docker startup hook so the rules are applied before containers
+restart, including after runtime upgrades:
 
 ```bash
 mcpssh \
-  "iptables-save > /etc/iptables/rules.v4"
+  "mkdir -p /etc/systemd/system/docker.service.d && \
+   cp /opt/scanmalware-mcp/deploy/iptables/docker-egress.conf /etc/systemd/system/docker.service.d/scanmalware-egress.conf && \
+   systemctl daemon-reload"
 ```
 
 Verify egress is locked to the proxy:
@@ -294,7 +422,7 @@ cd /opt/scanmalware-mcp
 
 mkdir -p deploy/mitmproxy/state logs/mitmproxy
 
-docker-compose -f deploy/docker-compose.yml up -d proxy
+docker compose -f deploy/docker-compose.yml up -d proxy
 
 # Wait for CA generation.
 for i in $(seq 1 20); do
@@ -309,7 +437,7 @@ if [ ! -f deploy/mitmproxy/state/mitmproxy-ca-cert.pem ]; then
   exit 1
 fi
 
-docker-compose -f deploy/docker-compose.yml up -d mcp nginx
+docker compose -f deploy/docker-compose.yml up -d mcp nginx
 SH
 ```
 The MCP container reads the CA from `/etc/scanmalware-certs/mitmproxy-ca-cert.pem`
@@ -366,6 +494,7 @@ SH
 Core:
 - `SCANMALWARE_BASE_URL` (default `https://scanmalware.com`)
 - `SCANMALWARE_TIMEOUT_S` (default `30`)
+- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default `90`; favicon statistics and OCR text search)
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default `10485760`)
 - `SCANMALWARE_ALLOW_HTTP` (default `false`)
 - `SCANMALWARE_ALLOW_PRIVATE_TARGETS` (default `false`)
@@ -404,7 +533,7 @@ mcpssh \
   "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
 The redeploy script stops containers before swapping files to avoid bind-mount inode issues.
-If the script is not on the droplet yet, run the legacy tar + docker-compose command once to install it.
+If the script is not on the droplet yet, run the legacy tar + docker compose command once to install it.
 
 Optional one-shot helper from the repo root:
 ```bash

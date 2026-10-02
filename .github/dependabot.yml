@@ -1,0 +1,19 @@
+version: 2
+updates:
+  - package-ecosystem: docker
+    directories:
+      - /
+      - /deploy/nginx
+      - /deploy/mitmproxy
+    schedule:
+      interval: weekly
+  - package-ecosystem: pip
+    directories:
+      - /
+      - /deploy/mitmproxy
+    schedule:
+      interval: weekly
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

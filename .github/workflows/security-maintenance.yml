@@ -1,0 +1,68 @@
+name: Security maintenance
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  schedule:
+    - cron: '17 5 1 * *'
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.14'
+      - name: Audit locked application dependencies
+        run: |
+          python -m pip install pip-audit
+          pip-audit --no-deps --disable-pip -r requirements.lock
+      - name: Build patched images
+        run: |
+          docker build --pull --no-cache -t mcp-check .
+          docker build --pull --no-cache -t nginx-check deploy/nginx
+          docker build --pull --no-cache -t proxy-check deploy/mitmproxy
+      - name: Test the built images
+        run: |
+          docker run --rm --network none -v "$PWD/tests:/tests:ro" mcp-check python -m unittest discover -s /tests -v
+          docker run --rm --network none -v "$PWD:/repo:ro" proxy-check python -m unittest discover -s /repo/tests/proxy -v
+          docker run --rm --network none nginx-check nginx -t
+          python -m unittest discover -s tests/maintenance -v
+      - name: Report proxy dependency advisories
+        run: |
+          audit_status=0
+          pip-audit --no-deps --disable-pip -r deploy/mitmproxy/requirements.lock --format json --output proxy-audit.json || audit_status=$?
+          if [ "$audit_status" -gt 1 ]; then exit "$audit_status"; fi
+          python deploy/check_proxy_audit.py proxy-audit.json
+      - name: Scan MCP image for fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: mcp-check
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Scan Nginx image for fixable high and critical vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: nginx-check
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '1'
+      - name: Report remaining proxy image advisories
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: proxy-check
+          scanners: vuln
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: '0'
+          format: json
+          output: proxy-image-audit.json
+      - name: Fail on new proxy findings or overdue review
+        run: python deploy/check_proxy_audit.py proxy-image-audit.json

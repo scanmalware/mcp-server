@@ -1,0 +1,4 @@
+# Build tools included in the container lock alongside pyproject.toml dependencies.
+pip>=26.2
+setuptools>=68
+wheel

@@ -43,6 +43,7 @@ Other env vars:
 - `SCANMALWARE_BASE_URL` (default: `https://scanmalware.com`)
 - `SCANMALWARE_ALLOW_HTTP` (default: `false`)
 - `SCANMALWARE_TIMEOUT_S` (default: `30`)
+- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default: `90`; favicon statistics and OCR text search only)
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default: `10485760`)
 - `SCANMALWARE_ALLOW_PRIVATE_TARGETS` (default: `false`)
 - `SCANMALWARE_CA_CERT` (optional; path to a CA bundle for SSL bump)
@@ -59,12 +60,40 @@ and therefore memory - flat.
 Tool note: `submit_scan` does not call `/api/v1/csrf-token`; there is no CSRF token tool.
 Tool note: some upstream endpoints are disabled and excluded from the tool list (e.g., `get_improvements`, `find_screenshot_duplicates`, `get_ai_stats`, `search_js_fingerprinter2_code_hash`, `search_js_segments_by_tlsh`).
 Some search tools require at least one filter and will raise a validation error if none are provided.
+`search_js_fingerprint_patterns` needs one of its boolean filters;
+`search_js_obfuscation` needs `risk_level`, `min_risk_score`, or `has_eval`;
+`search_js_malware_families` needs `min_cluster_size` or `similarity_threshold`.
+Setting only `limit` does not satisfy these requirements. OCR search requires
+at least three characters after trimming. Library lookups use detected identifiers
+from `get_js_library_inventory`; `search_js_fingerprint_by_library` accepts
+`Next.js` as an alias for the detected identifier `nextjs`.
+
+## Scan visibility
+
+`submit_scan` defaults to `scan_type="public"`: the target URL and scan results
+appear in ScanMalware's public feed and are visible to other users and search
+engines. Set `scan_type` explicitly for client targets, confidential URLs, and
+security engagements:
+
+- `public`: publishes the scan. Use for these targets only with explicit approval to publish.
+- `unlisted`: excluded from public listings, but accessible to anyone with the direct link.
+- `private`: results are restricted to the authenticated ScanMalware account.
+  Requires a valid `SCANMALWARE_BEARER_TOKEN` configured on the MCP server;
+  `MCP_AUTH_TOKEN` only controls access to the MCP server and does not provide
+  ScanMalware authentication.
+
+If visibility has not already been specified for these targets, ask the user
+to choose `unlisted` or `private` before submitting. If submission fails, do not
+retry with a less restrictive visibility. These modes control scan visibility;
+requests still go to ScanMalware and may be recorded in server logs (see
+[the MCP privacy policy](PRIVACY.md)). ScanMalware documents the visibility
+options in its [privacy policy](https://scanmalware.com/privacy).
 
 ## Example prompts
 
 Phishing triage (submit → wait → summarize):
 ```text
-Submit a scan for https://example-login-update.com, wait for completion, and
+Submit an unlisted scan for https://example-login-update.com, wait for completion, and
 return status, risk_score, and the top indicators. If high risk, include the
 AI analysis and screenshot resource.
 ```
@@ -126,10 +155,9 @@ doctl compute firewall create \
 
 ### Install Docker + compose on the droplet
 
-```bash
-ssh -i /path/to/key root@<droplet-ip> \
-  "apt-get update -y && apt-get install -y docker.io docker-compose"
-```
+Install Docker Engine and the Compose plugin from the [official Docker apt repository](https://docs.docker.com/engine/install/debian/). Use `docker compose`; the old Python `docker-compose` client is incompatible with current Docker Engine.
+
+See [the operations runbook](docs/OPERATIONS.md#security-maintenance) for pinned builds and maintenance checks.
 
 ### Upload and run
 
@@ -139,7 +167,7 @@ scp -i /path/to/key /tmp/scanmalware-mcp.tar.gz root@<droplet-ip>:/tmp/
 ssh -i /path/to/key root@<droplet-ip> \
   "mkdir -p /opt/scanmalware-mcp && tar -xzf /tmp/scanmalware-mcp.tar.gz -C /opt/scanmalware-mcp"
 ssh -i /path/to/key root@<droplet-ip> \
-  "cd /opt/scanmalware-mcp && docker-compose -f deploy/docker-compose.yml up -d --build"
+  "cd /opt/scanmalware-mcp && docker compose -f deploy/docker-compose.yml up -d --build"
 ```
 
 ### Verify
@@ -231,7 +259,7 @@ ssh -i /path/to/key root@<droplet-ip> \
   "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
 The redeploy script stops containers before swapping files to avoid bind-mount inode issues.
-If the script is not on the droplet yet, run the legacy tar + docker-compose command once to install it.
+If the script is not on the droplet yet, run the legacy tar + docker compose command once to install it.
 
 Optional one-shot helper from the repo root:
 ```bash

@@ -1,0 +1,59 @@
+{
+  "review_by": "2026-11-02",
+  "reason": "mitmproxy 12.2.3 upper bounds; mitigations and remaining scope are documented in docs/OPERATIONS.md",
+  "packages": {
+    "cryptography": {
+      "version": "48.0.1",
+      "ids": [
+        "CVE-2026-69247",
+        "CVE-2026-69248",
+        "CVE-2026-69249",
+        "GHSA-g6cj-pr64-35w5",
+        "GHSA-jwv3-5hgf-82ww",
+        "GHSA-m2h6-j472-rp4c",
+        "PYSEC-2026-3552",
+        "PYSEC-2026-3553",
+        "PYSEC-2026-3554"
+      ]
+    },
+    "h2": {
+      "version": "4.3.0",
+      "ids": [
+        "CVE-2026-71554",
+        "GHSA-6hr6-w5qg-qmwg",
+        "PYSEC-2026-3628"
+      ]
+    },
+    "msgpack": {
+      "version": "1.1.2",
+      "ids": [
+        "CVE-2026-57585",
+        "GHSA-6v7p-g79w-8964",
+        "PYSEC-2026-3625"
+      ]
+    },
+    "tornado": {
+      "version": "6.5.5",
+      "ids": [
+        "CVE-2026-49853",
+        "CVE-2026-49854",
+        "CVE-2026-49855",
+        "CVE-2026-82397",
+        "GHSA-3hv7-mjh2-fv65",
+        "GHSA-3x9g-8vmp-wqvf",
+        "GHSA-8423-8fgw-73vq",
+        "GHSA-c2m8-h5v5-343r",
+        "GHSA-chx6-46f5-w4vp",
+        "GHSA-cx3h-4qpv-8hc9",
+        "GHSA-mgf9-4vpg-hj56",
+        "GHSA-mpf4-983q-p7j4",
+        "GHSA-pw6j-qg29-8w7f",
+        "GHSA-wwv5-g3v4-889x",
+        "PYSEC-2026-3387",
+        "PYSEC-2026-3388",
+        "PYSEC-2026-3389",
+        "PYSEC-2026-3928"
+      ]
+    }
+  }
+}

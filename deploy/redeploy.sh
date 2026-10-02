@@ -18,7 +18,7 @@ fi
 STATE_DIR="${ROOT_DIR}/deploy/mitmproxy/state"
 
 echo "Stopping containers to avoid bind-mount inode issues..."
-docker-compose -f "${COMPOSE_FILE}" down
+docker compose -f "${COMPOSE_FILE}" down
 
 # The mitmproxy CA lives in deploy/mitmproxy/state and is gitignored, so it is
 # NOT in the uploaded archive - only a .gitkeep is. The wipe below would destroy
@@ -53,6 +53,6 @@ if [[ ! -f "${STATE_DIR}/mitmproxy-ca-cert.pem" ]]; then
 fi
 
 echo "Starting containers..."
-docker-compose -f "${COMPOSE_FILE}" up -d --build
+docker compose -f "${COMPOSE_FILE}" up -d --build
 
 echo "Done."

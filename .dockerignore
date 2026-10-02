@@ -13,3 +13,6 @@ build
 .git
 .gitignore
 logs
+.env
+.env.*
+deploy/mitmproxy/state

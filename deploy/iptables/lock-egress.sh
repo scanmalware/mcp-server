@@ -6,6 +6,11 @@ MCP_IP=${MCP_IP:-172.28.0.10}
 PROXY_IP=${PROXY_IP:-172.28.0.11}
 PROXY_PORT=${PROXY_PORT:-3128}
 
+# This script also runs before Docker starts, including on the first boot.
+if ! iptables -S "$CHAIN" >/dev/null 2>&1; then
+  iptables -N "$CHAIN"
+fi
+
 add_rule() {
   local rule=("$@")
   if ! iptables -C "$CHAIN" "${rule[@]}" >/dev/null 2>&1; then
