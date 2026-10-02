@@ -1,5 +1,5 @@
 Privacy Policy
-Last updated: 2026-01-06
+Last updated: 2026-10-02
 
 This Privacy Policy describes how the ScanMalware MCP server ("Service")
 collects, uses, and shares information when you access or use the Service.
@@ -30,9 +30,10 @@ Sharing
 - We do not sell personal data.
 
 Retention
-- Logs are retained based on size-based rotation settings. Defaults are
-  configured via environment variables and typically keep multiple backups.
-  See docs/OPERATIONS.md for current defaults.
+- Logs rotate based on size; Nginx and proxy logs also rotate daily. Rotation
+  keeps a bounded number of backups and does not guarantee a fixed retention
+  period. See [the operations runbook](docs/OPERATIONS.md#rotation-and-retention)
+  for current settings.
 
 Security
 - TLS is used for public access.

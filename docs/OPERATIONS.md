@@ -48,6 +48,7 @@ Host scanmalware-mcp
 - Nginx config: `/opt/scanmalware-mcp/deploy/nginx/nginx.conf`
 - Landing page: `/opt/scanmalware-mcp/deploy/nginx/html/index.html`
 - mitmproxy addon: `/opt/scanmalware-mcp/deploy/mitmproxy/log_full.py`
+- mitmproxy destination guard: `/opt/scanmalware-mcp/deploy/mitmproxy/restrict_hosts.py`
 - mitmproxy state (CA): `/opt/scanmalware-mcp/deploy/mitmproxy/state`
 - MCP source mount: `/opt/scanmalware-mcp/scanmalware_mcp` → `/app/scanmalware_mcp` (`PYTHONPATH=/app`)
 
@@ -153,7 +154,7 @@ notifications, so it gives up nothing it actually used.
 `stateless_http=True` means the `initialize` params are not carried across
 requests, so `client_name` and `client_version` are `null` on `mcp.tool.start`
 events. Tool events therefore also log `user_agent`, taken from the HTTP header,
-which does survive. Group usage by `user_agent`; the popularity example above
+which does survive. Group usage by `user_agent`; the [popularity example below](#popularity-reporting-example)
 does this already.
 
 The raw `mcp-http.log` still records full request headers either way.
@@ -169,8 +170,9 @@ switched to `httpx2`, so it can no longer be relied on transitively.
 ## Security maintenance
 
 The 2026-10-02 maintenance release uses Docker Engine 29.8.2 from Docker's
-signed Debian repository, the Compose plugin, Python 3.14.8, MCP 1.30.0 and
-Nginx 1.30.5. Host Debian security updates remain automatic. Container image
+signed Debian repository, Compose 5.5.1, containerd 2.3.6, runc 1.5.1,
+Python 3.14.8, MCP 1.30.0, Nginx 1.30.5 and mitmproxy 12.2.3.
+Host Debian security updates remain automatic. Container image
 contents require a separate rebuild and deployment; restarting does not patch them.
 
 Python and Nginx base images are pinned by digest. Each build applies available
@@ -192,11 +194,14 @@ uv run --no-project --with pip-audit pip-audit --no-deps --disable-pip -r requir
 uv run --no-project --with pip-audit pip-audit --no-deps --disable-pip -r deploy/mitmproxy/requirements.lock
 ```
 
-The GitHub security-maintenance workflow rebuilds images and runs dependency
-checks and tests on pushes, pull requests, manual runs and the first of each
-month. Dependabot checks base images and dependencies weekly. These checks do
-not deploy to production; the workflow becomes active when committed to the
-repository's default branch.
+The [GitHub security-maintenance workflow](../.github/workflows/security-maintenance.yml)
+is active on `main`. It rebuilds images and runs dependency checks and tests on
+pushes to `main`, pull requests, manual runs and the first of each month at
+05:17 UTC. [Dependabot](../.github/dependabot.yml) checks base images and Python
+dependencies weekly, and GitHub Actions monthly. Automated updates stay on
+the tested Python 3.14, Nginx 1.30 and MCP 1.x release lines; release-line
+migrations need a separate compatibility review. These checks do not deploy
+to production.
 
 Before a runtime upgrade or reboot, retain a droplet snapshot, the private
 configuration/CA backup and previous images. Build and test candidates first.
@@ -238,7 +243,7 @@ Two files are persisted on the host and survive redeploys:
 - Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log`
   - Includes full tool args and full tool results (no redaction).
 
-Rotation (defaults): 10MB max, 7 backups. Controlled by:
+Rotation (defaults): 10 MiB max per file, 7 backups. Controlled by:
 - `SCANMALWARE_LOG_FILE`, `SCANMALWARE_LOG_MAX_BYTES`, `SCANMALWARE_LOG_BACKUP_COUNT`
 - `SCANMALWARE_FULL_LOG_FILE`, `SCANMALWARE_FULL_LOG_MAX_BYTES`, `SCANMALWARE_FULL_LOG_BACKUP_COUNT`
 
@@ -264,7 +269,8 @@ rising `mcp.startup` count in a current log means the process is restarting.
   - Includes raw MCP HTTP request/response headers and bodies (base64) with per-request IDs.
   - Bodies are captured up to `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES` (default `1048576`, set to `0` for unlimited).
 
-Rotation (defaults): 10MB max, 7 backups. Controlled by:
+Rotation: 10 MiB max per file; 63 backups in Compose (about 640 MiB including
+the active file), or 7 backups for the standalone server. Controlled by:
 - `SCANMALWARE_MCP_HTTP_LOG_FILE`, `SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES`, `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT`
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES`
 
@@ -415,6 +421,10 @@ CA via `SCANMALWARE_CA_CERT`.
 
 Generate the CA on the droplet and restart the stack:
 
+Set up `mcpssh` using [Connect to the DigitalOcean instance](#connect-to-the-digitalocean-instance)
+first. On a fresh host, provision the [Nginx TLS certificates](#https--tls) before
+starting Nginx.
+
 ```bash
 mcpssh <<'SH'
 set -euo pipefail
@@ -422,7 +432,7 @@ cd /opt/scanmalware-mcp
 
 mkdir -p deploy/mitmproxy/state logs/mitmproxy
 
-docker compose -f deploy/docker-compose.yml up -d proxy
+docker compose -f deploy/docker-compose.yml up -d --build proxy
 
 # Wait for CA generation.
 for i in $(seq 1 20); do
@@ -437,7 +447,7 @@ if [ ! -f deploy/mitmproxy/state/mitmproxy-ca-cert.pem ]; then
   exit 1
 fi
 
-docker compose -f deploy/docker-compose.yml up -d mcp nginx
+docker compose -f deploy/docker-compose.yml up -d --build mcp nginx
 SH
 ```
 The MCP container reads the CA from `/etc/scanmalware-certs/mitmproxy-ca-cert.pem`
@@ -498,6 +508,7 @@ Core:
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default `10485760`)
 - `SCANMALWARE_ALLOW_HTTP` (default `false`)
 - `SCANMALWARE_ALLOW_PRIVATE_TARGETS` (default `false`)
+- `SCANMALWARE_BEARER_TOKEN` (optional; required for private scans)
 
 MCP server:
 - `MCP_TRANSPORT` (default `streamable-http`)
@@ -516,11 +527,12 @@ Logging:
 - `SCANMALWARE_FULL_LOG_BACKUP_COUNT` (default `7`)
 - `SCANMALWARE_MCP_HTTP_LOG_FILE` (default `/var/log/scanmalware-mcp/mcp-http.log`)
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES` (default `10485760`)
-- `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT` (default `7`)
+- `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT` (standalone default `7`; Compose default `63`)
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES` (default `1048576`, set `0` for unlimited)
 
 Proxy:
-- `SCANMALWARE_PROXY_URL` (default `http://172.28.0.11:3128`)
+- `SCANMALWARE_PROXY_URL` (unset for standalone use; Compose default `http://172.28.0.11:3128`)
+- `SCANMALWARE_CA_CERT` (optional CA bundle; Compose default `/etc/scanmalware-certs/mitmproxy-ca-cert.pem`)
 
 ## Deploy / redeploy
 

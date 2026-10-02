@@ -4,7 +4,7 @@ Minimal Python MCP server that wraps the public ScanMalware.com API.
 
 ## Operations
 
-See `docs/OPERATIONS.md` for deployment, TLS, logging, and how to connect to the DigitalOcean droplet.
+See [the operations runbook](docs/OPERATIONS.md) for deployment, TLS, logging, security maintenance, and how to connect to the DigitalOcean droplet.
 
 ## Run locally (Streamable HTTP)
 
@@ -25,10 +25,10 @@ scanmalware-mcp
 
 ```bash
 docker build -t scanmalware-mcp .
-docker run --rm -p 127.0.0.1:8000:8000 \\
-  -e MCP_TRANSPORT=streamable-http \\
-  -e MCP_HOST=0.0.0.0 \\
-  -e MCP_PORT=8000 \\
+docker run --rm -p 127.0.0.1:8000:8000 \
+  -e MCP_TRANSPORT=streamable-http \
+  -e MCP_HOST=0.0.0.0 \
+  -e MCP_PORT=8000 \
   scanmalware-mcp
 ```
 
@@ -112,14 +112,17 @@ Summarize issuer, subject, validity dates, and SANs; flag mismatches.
 
 ## Deploy to DigitalOcean (Debian + Docker + Nginx)
 
-The deploy bundle lives in `deploy/` and runs two containers:
+The deploy bundle lives in `deploy/` and runs three containers:
+
 - `mcp` (this server, streamable HTTP on port 8000)
-- `nginx` (frontend on port 80; proxies `/mcp` to the MCP server)
+- `nginx` (frontend on ports 80/443; redirects HTTP to HTTPS and proxies `/mcp` to the MCP server)
+- `proxy` (mitmproxy, checks ScanMalware destinations and logs upstream HTTP traffic)
 
 ### Prereqs
 
 - `doctl` authenticated (`doctl auth init`)
 - SSH key uploaded to DigitalOcean (used by `doctl compute droplet create`)
+- DNS and Let's Encrypt certificates at the paths in [HTTPS / TLS](docs/OPERATIONS.md#https--tls) before starting Nginx
 
 ### Create a small droplet in Germany (Frankfurt)
 
@@ -166,15 +169,18 @@ tar --exclude=.git --exclude=.venv --exclude=__pycache__ -czf /tmp/scanmalware-m
 scp -i /path/to/key /tmp/scanmalware-mcp.tar.gz root@<droplet-ip>:/tmp/
 ssh -i /path/to/key root@<droplet-ip> \
   "mkdir -p /opt/scanmalware-mcp && tar -xzf /tmp/scanmalware-mcp.tar.gz -C /opt/scanmalware-mcp"
-ssh -i /path/to/key root@<droplet-ip> \
-  "cd /opt/scanmalware-mcp && docker compose -f deploy/docker-compose.yml up -d --build"
 ```
+
+On a fresh host, follow [TLS inspection](docs/OPERATIONS.md#tls-inspection-mitmproxy)
+to build the proxy and generate its CA before starting MCP and Nginx. Install
+the [egress rules and Docker startup hook](docs/OPERATIONS.md#egress-restriction-scanmalware-only)
+and [log rotation](docs/OPERATIONS.md#rotation-and-retention) as part of host setup.
 
 ### Verify
 
 ```bash
 curl -I https://mcp.scanmalware.com/
-curl -I https://mcp.scanmalware.com/mcp
+curl -sS -o /dev/null -w '%{http_code}\n' https://mcp.scanmalware.com/mcp
 ```
 
 `/` should return 200 from Nginx. `/mcp` returns 406 on GET without MCP Accept headers, which is expected.
@@ -186,7 +192,7 @@ python - <<'PY'
 import json
 import httpx
 
-URL = "http://<droplet-ip>/mcp"
+URL = "https://mcp.scanmalware.com/mcp"
 HEADERS = {
     "accept": "application/json, text/event-stream",
     "content-type": "application/json",
@@ -206,6 +212,7 @@ init_payload = {
 with httpx.Client(timeout=10) as client:
     init_resp = client.post(URL, headers=HEADERS, json=init_payload)
     init_resp.raise_for_status()
+    # Stateless deployments return no session header.
     session_id = init_resp.headers.get("mcp-session-id")
 
     def extract_sse_data(text: str) -> dict:
@@ -217,24 +224,20 @@ with httpx.Client(timeout=10) as client:
     init_message = extract_sse_data(init_resp.text)
     protocol_version = init_message["result"]["protocolVersion"]
 
+    headers = {**HEADERS, "mcp-protocol-version": protocol_version}
+    if session_id:
+        headers["mcp-session-id"] = session_id
+
     # Send initialized notification
     client.post(
         URL,
-        headers={
-            **HEADERS,
-            "mcp-session-id": session_id,
-            "mcp-protocol-version": protocol_version,
-        },
+        headers=headers,
         json={"jsonrpc": "2.0", "method": "notifications/initialized"},
     )
 
     tools_resp = client.post(
         URL,
-        headers={
-            **HEADERS,
-            "mcp-session-id": session_id,
-            "mcp-protocol-version": protocol_version,
-        },
+        headers=headers,
         json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"},
     )
     tools_resp.raise_for_status()
