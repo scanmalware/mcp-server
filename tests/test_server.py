@@ -25,11 +25,17 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.upstream_status = 200
         self.upstream_timeout = False
         self.request_id = 0
+        # Optional per-request override: return a Response, or None for the default.
+        self.route = None
 
         def handle(request: httpx.Request) -> httpx.Response:
             self.requests.append(request)
             if self.upstream_timeout:
                 raise httpx.ReadTimeout("slow upstream", request=request)
+            if self.route is not None:
+                routed = self.route(request)
+                if routed is not None:
+                    return routed
             return httpx.Response(self.upstream_status, json={"status": "ok"})
 
         self.upstream = httpx.AsyncClient(
@@ -114,6 +120,10 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         for name, args, expected in (
             ("get_favicon_stats", {}, 90),
             ("search_ocr", {"q": "phishing"}, 90),
+            # ~31 s per call, measured 2026-10-07; the 30 s default timed out every time.
+            ("get_jsfingerprint_similarity_counts", {"fingerprint_id": 10448358}, 90),
+            # 57 s for a cold query, 0.2 s once cached.
+            ("search_js_fingerprinter2_signature", {"signature": "fetch:4|complex"}, 90),
             ("get_recent_scans", {}, 30),
         ):
             with self.subTest(tool=name):
@@ -199,6 +209,120 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.get("isError"), result)
         self.assertEqual(len(self.requests), 1)
         self.assertEqual(json.loads(self.requests[0].content)["scan_type"], "private")
+
+    SCAN_ID = "ff26242d-0a9e-405d-a03d-3554cc90b682"
+
+    @staticmethod
+    def streamed(status: int, payload: dict) -> httpx.Response:
+        # An unread body, as the real upstream delivers it. httpx.Response(json=...)
+        # is pre-read, which hid the ResponseNotRead crash from these tests.
+        return httpx.Response(
+            status,
+            headers={"content-type": "application/json"},
+            stream=httpx.ByteStream(json.dumps(payload).encode()),
+        )
+
+    async def tools(self) -> dict[str, dict]:
+        listed = await self.rpc("tools/list", {})
+        return {tool["name"]: tool for tool in listed["tools"]}
+
+    async def test_missing_favicon_and_netlog_are_answers_not_errors(self) -> None:
+        # Both endpoints are streamed. Reading the error body of a streamed 404
+        # used to raise httpx.ResponseNotRead, so a scan without a favicon or
+        # NetLog produced an internal error instead of an answer.
+        self.route = lambda request: self.streamed(404, {"error": "Not Found", "status_code": 404})
+        favicon = await self.call("get_favicon", scan_id=self.SCAN_ID)
+        self.assertFalse(favicon.get("isError"), favicon)
+        self.assertEqual(favicon["structuredContent"]["found"], False)
+        netlog = await self.call("get_netlog", scan_id=self.SCAN_ID)
+        self.assertFalse(netlog.get("isError"), netlog)
+        self.assertEqual(netlog["structuredContent"]["available"], False)
+
+    async def test_streamed_upstream_errors_report_the_api_error(self) -> None:
+        self.route = lambda request: self.streamed(500, {"error": "upstream broke"})
+        for name in ("get_favicon", "get_netlog"):
+            with self.subTest(tool=name):
+                result = await self.call(name, scan_id=self.SCAN_ID)
+                self.assertTrue(result.get("isError"), result)
+                text = result["content"][0]["text"]
+                self.assertIn("ScanMalware API error 500", text)
+                self.assertIn("upstream broke", text)
+                self.assertNotIn("read()", text)
+
+    async def test_present_favicon_is_returned(self) -> None:
+        png = b"\x89PNG\r\n\x1a\nfavicon"
+        self.route = lambda request: httpx.Response(200, content=png, headers={"content-type": "image/png"})
+        result = await self.call("get_favicon", scan_id=self.SCAN_ID)
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(result["structuredContent"]["found"], True)
+        self.assertEqual(result["structuredContent"]["size_bytes"], len(png))
+
+    async def test_signature_is_sent_as_one_encoded_path_segment(self) -> None:
+        result = await self.call("search_js_fingerprinter2_signature", signature="setTimeout:30|fetch:4/x?y#z")
+        self.assertFalse(result.get("isError"), result)
+        request = self.requests[-1]
+        self.assertTrue(
+            request.url.raw_path.startswith(
+                b"/api/v1/js-fingerprinter2/search/signature/setTimeout%3A30%7Cfetch%3A4%2Fx%3Fy%23z?"
+            ),
+            request.url.raw_path,
+        )
+        self.assertEqual(dict(request.url.params), {"limit": "20"})
+        result = await self.call("search_js_fingerprinter2_signature", signature="   ")
+        self.assertTrue(result.get("isError"), result)
+        self.assertEqual(len(self.requests), 1)
+
+    async def test_scan_visibility_must_be_chosen(self) -> None:
+        schema = (await self.tools())["submit_scan"]["inputSchema"]
+        self.assertIn("scan_type", schema["required"])
+        self.assertNotIn("default", schema["properties"]["scan_type"])
+        result = await self.call("submit_scan", url="https://example.com")
+        self.assertTrue(result.get("isError"), result)
+        self.assertEqual(self.requests, [])
+
+    async def test_scan_report_only_casts_the_two_captcha_free_votes(self) -> None:
+        tool = (await self.tools())["submit_scan_report"]
+        properties = tool["inputSchema"]["properties"]
+        self.assertEqual(set(properties), {"scan_id", "report_type", "report_details"})
+        self.assertEqual(set(properties["report_type"]["enum"]), {"positive_feedback", "malware"})
+        for vote in ("positive_feedback", "malware"):
+            result = await self.call("submit_scan_report", scan_id=self.SCAN_ID, report_type=vote)
+            self.assertFalse(result.get("isError"), result)
+            request = self.requests[-1]
+            self.assertEqual(
+                json.loads(request.content),
+                {"scan_id": self.SCAN_ID, "report_type": vote, "skip_captcha": True},
+            )
+            self.assertNotIn("x-forwarded-for", request.headers)
+            self.assertNotIn("x-real-ip", request.headers)
+        sent = len(self.requests)
+        for args in (
+            {"report_type": "phishing"},
+            {"report_type": "malware", "report_details": "x" * 1001},
+        ):
+            with self.subTest(args=args):
+                result = await self.call("submit_scan_report", scan_id=self.SCAN_ID, **args)
+                self.assertTrue(result.get("isError"), result)
+        self.assertEqual(len(self.requests), sent)
+        # The SDK ignores arguments a tool does not declare, so a client still
+        # sending the removed IP parameters gets a vote without the spoofed header.
+        result = await self.call(
+            "submit_scan_report", scan_id=self.SCAN_ID, report_type="malware", x_forwarded_for="203.0.113.9"
+        )
+        self.assertFalse(result.get("isError"), result)
+        self.assertNotIn("x-forwarded-for", self.requests[-1].headers)
+        self.assertNotIn("203.0.113.9", self.requests[-1].content.decode())
+
+    async def test_descriptions_do_not_point_at_other_tools(self) -> None:
+        # Directory review rejects descriptions that instruct the model to call
+        # other tools. A tool may describe its own inputs, not route the model.
+        tools = await self.tools()
+        for name, tool in tools.items():
+            description = tool.get("description") or ""
+            for other in tools:
+                if other != name:
+                    with self.subTest(tool=name, mentions=other):
+                        self.assertNotRegex(description, rf"\b{other}\b")
 
 
 if __name__ == "__main__":

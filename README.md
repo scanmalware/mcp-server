@@ -70,10 +70,10 @@ from `get_js_library_inventory`; `search_js_fingerprint_by_library` accepts
 
 ## Scan visibility
 
-`submit_scan` defaults to `scan_type="public"`: the target URL and scan results
-appear in ScanMalware's public feed and are visible to other users and search
-engines. Set `scan_type` explicitly for client targets, confidential URLs, and
-security engagements:
+`submit_scan` requires `scan_type`; there is no default. A `public` scan puts the
+target URL and scan results in ScanMalware's public feed, visible to other users
+and search engines. Choose deliberately for client targets, confidential URLs,
+and security engagements:
 
 - `public`: publishes the scan. Use for these targets only with explicit approval to publish.
 - `unlisted`: excluded from public listings, but accessible to anyone with the direct link.
