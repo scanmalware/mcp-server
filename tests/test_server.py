@@ -313,6 +313,16 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("x-forwarded-for", self.requests[-1].headers)
         self.assertNotIn("203.0.113.9", self.requests[-1].content.decode())
 
+    async def test_every_tool_explains_itself(self) -> None:
+        # Directory review (OpenAI) requires each description to explain what the
+        # tool does, when it is useful and its limits. One-line stubs such as
+        # "Get OCR stats." failed that bar for most of the 128 tools.
+        tools = await self.tools()
+        self.assertEqual(len(tools), 128)
+        for name, tool in tools.items():
+            with self.subTest(tool=name):
+                self.assertGreaterEqual(len(tool.get("description") or ""), 60)
+
     async def test_descriptions_do_not_point_at_other_tools(self) -> None:
         # Directory review rejects descriptions that instruct the model to call
         # other tools. A tool may describe its own inputs, not route the model.
