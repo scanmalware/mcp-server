@@ -289,13 +289,23 @@ cryptography, HPACK and ASN.1 updates were applied.
 
 Two files are persisted on the host and survive redeploys:
 
-- Sanitized log: `/opt/scanmalware-mcp/logs/mcp/mcp.log`
+- Sanitized log: `/opt/scanmalware-mcp/logs/mcp/mcp.log` (about three months in Compose)
   - Includes session starts (client name/version, protocol version), tool/resource
     start/end/error/cancelled, args (sanitized), timing, user agent and IP fields.
-- Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log`
+  - Every event of a call carries its `call_id`. The end, error and cancelled
+    events also list the call's `upstream` requests as sent (`GET /api/v1/... 200`,
+    polling collapsed to one entry with a count), so this log alone shows which
+    API paths a crafted argument reached.
+  - Scan tools (`submit_scan`, `get_scan_summary`, `wait_for_scan`,
+    `get_scan_result`) add an `mcp.scan.outcome` event: scan ID, submitted and
+    final URL, visibility, status, redirect count, risk. If the final URL or a
+    redirect lands on a private, loopback or link-local address, an
+    `mcp.scan.internal_target` WARNING follows. See [Security monitoring](#security-monitoring).
+- Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log` (about two weeks in Compose)
   - Includes full tool args and full tool results (no redaction).
 
-Rotation (defaults): 10 MiB max per file, 7 backups. Controlled by:
+Rotation: 10 MiB max per file; Compose keeps 30 backups of `mcp.log` and 48 of
+`mcp-full.log`, the standalone server 7 of each. Controlled by:
 - `SCANMALWARE_LOG_FILE`, `SCANMALWARE_LOG_MAX_BYTES`, `SCANMALWARE_LOG_BACKUP_COUNT`
 - `SCANMALWARE_FULL_LOG_FILE`, `SCANMALWARE_FULL_LOG_MAX_BYTES`, `SCANMALWARE_FULL_LOG_BACKUP_COUNT`
 
@@ -343,8 +353,8 @@ a start event.
   - Includes raw MCP HTTP request/response headers and bodies (base64) with per-request IDs.
   - Bodies are captured up to `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES` (default `1048576`, set to `0` for unlimited).
 
-Rotation: 10 MiB max per file; 63 backups in Compose (about 640 MiB including
-the active file), or 7 backups for the standalone server. Controlled by:
+Rotation: 10 MiB max per file; 112 backups in Compose (about 1.1 GiB, two weeks
+at ~79 MB a day in October 2026), or 7 backups for the standalone server. Controlled by:
 - `SCANMALWARE_MCP_HTTP_LOG_FILE`, `SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES`, `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT`
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES`
 
@@ -363,6 +373,11 @@ The access log includes client IPs, the Host header and TLS details. Its
 - Full HTTP log: `/opt/scanmalware-mcp/logs/mitmproxy/full.log`
   - JSON lines with full request/response headers and bodies (base64).
   - Bodies may be compressed (see `content-encoding` header).
+  - Each upstream request carries the MCP call's `X-MCP-Call-ID` header, which
+    matches `call_id` in `mcp.log`.
+  - Every refused destination is a `proxy.blocked` line (method, host, port,
+    client). Until October 2026 only refused plain-HTTP requests appeared; a
+    refused HTTPS `CONNECT` left no trace.
 
 ### Rotation and retention
 
@@ -393,11 +408,18 @@ Nginx receives `USR1` after a rename to reopen its logs. The proxy addon opens
 and closes its file for each event and recreates it on the next write. Neither
 uses `copytruncate`. See [Nginx log rotation](https://nginx.org/en/docs/control.html).
 
-MCP application, full-result, and raw HTTP logs continue using Python rotation.
-The Compose deployment retains 63 raw HTTP backups plus the active file at
-10 MiB each (about 640 MiB, roughly a week at the observed traffic rate).
-The standalone server and other MCP log streams retain their existing defaults.
-Rotation limits are volume-based, so they do not guarantee a fixed history window.
+MCP application, full-result, and raw HTTP logs continue using Python rotation,
+10 MiB per file. The Compose deployment keeps, at October 2026 rates:
+
+| Log | Backups | Size | Covers about |
+| --- | --- | --- | --- |
+| `mcp.log` | 30 | ~310 MiB | three months |
+| `mcp-full.log` | 48 | ~490 MiB | two weeks (was two days with 7) |
+| `mcp-http.log` | 112 | ~1.1 GiB | two weeks (was one with 63) |
+
+Nginx and the proxy keep 14 daily archives (above). The standalone server keeps
+7 backups of each MCP log. Rotation limits are volume-based, so they do not
+guarantee a fixed history window.
 
 Verify the installed configuration and timer:
 
@@ -445,6 +467,8 @@ Components:
   TLS connections are intercepted; other connections can pass through.
 - HTTP/2 and HTTP/3 are disabled; the API connection uses HTTP/1.1.
 - Host firewall rules restrict the MCP container’s egress to the proxy IP.
+  Anything else it sends is logged (rate-limited) before being dropped; see
+  [Security monitoring](#security-monitoring).
 
 Apply the firewall rules (idempotent):
 
@@ -499,6 +523,92 @@ except Exception as exc:
 PY
 SH
 ```
+
+## Security monitoring
+
+The goal is to tell, after the fact, whether an attack worked. An October 2026
+review found the request side well logged but the outcome side short-lived, and
+code execution inside the container invisible. What each layer now shows:
+
+| Question | Where to look |
+| --- | --- |
+| What did a client send, and did the call fail? | `mcp.log`: `mcp.tool.start` args, then end/error/cancelled (three months) |
+| Which API paths did that call reach? | `upstream` on the end/error event; full exchanges in the proxy log via `X-MCP-Call-ID` = `call_id` |
+| Did a scan end on an internal address? | `mcp.scan.internal_target` WARNING in `mcp.log` |
+| What did the client get back? | `mcp-full.log` and `mcp-http.log` (two weeks) |
+| Did code in the container try to reach anything else? | `proxy.blocked` in the proxy log; firewall drops in the kernel log |
+| Did anything run in the container, or change on the host? | auditd (below) |
+| Who logged in to the host? | `journalctl -u ssh` |
+
+### Firewall drop log
+
+`deploy/iptables/lock-egress.sh` logs, at most 6 a minute, every packet from
+the MCP container that is not going to the proxy, just before dropping it. The
+server never sends such packets, so any entry means code in the container is
+trying another way out:
+
+```bash
+journalctl -k -g scanmalware-mcp-egress-drop --since today
+```
+
+### Process and change auditing (auditd)
+
+`deploy/audit/scanmalware-mcp.rules` records:
+
+- `scanmalware_mcp_exec`: programs started by UID 10001, the MCP container's
+  user. The server never starts programs, so apart from the entrypoint
+  (`/usr/local/bin/scanmalware-mcp`) when the container starts, every hit is a
+  `docker exec` or code execution in the container.
+- `scanmalware_deploy_change`, `scanmalware_code_change`: writes under `deploy/`
+  and `scanmalware_mcp/`. Deploys appear here too; that is the audit trail.
+- `ssh_authorized_keys`, `sshd_config`, `docker_config`: ways to keep access.
+
+Install once (check `free -m` first; the droplet has 2 GB and no swap):
+
+```bash
+mcpssh "bash /opt/scanmalware-mcp/deploy/audit/install.sh"
+mcpssh "ausearch -i -k scanmalware_mcp_exec --start today"
+```
+
+### Container hardening
+
+The `mcp` container runs with a read-only root filesystem, a small
+`noexec` `/tmp`, no Linux capabilities and `no-new-privileges`. It reads its
+code and writes only to the logs bind mount, so none of this changes its
+behaviour, but code running in it cannot modify the image, run files it drops
+in `/tmp`, or gain privileges.
+
+### Daily security report
+
+`deploy/security/daily_report.py` reads the last 24 hours of all of the above
+and writes findings, most serious first, to the journal and to
+`logs/security/report-<date>.txt` (90 kept). It runs every day at 06:15 UTC.
+
+- HIGH: a scan reached an internal host; the proxy or firewall refused
+  container traffic; a program ran as the container user; root's SSH keys or the
+  SSH config changed; a login came from an address not on the allowlist; a
+  container was killed for running out of memory.
+- MEDIUM: injection-style tool arguments (by client); a successful upstream
+  request for an encoded or dot path segment; nginx serving a 2xx for a path
+  other than the landing page, `/mcp`, `/.well-known/` or `/demo/`.
+- INFO: counts of calls, errors, cancellations and sessions by client;
+  restarts; deploy changes; SSH logins and failed attempts.
+
+```bash
+mcpssh "bash /opt/scanmalware-mcp/deploy/security/install.sh"       # once
+mcpssh "journalctl -t scanmalware-security -p warning --since -2d"   # HIGH and MEDIUM
+mcpssh "python3 /opt/scanmalware-mcp/deploy/security/daily_report.py --hours 6"   # ad hoc
+```
+
+To judge SSH logins rather than only list them, put the expected source
+addresses in `/etc/scanmalware-mcp/ssh-allowlist` (format in
+`deploy/security/ssh-allowlist.example`; not in git).
+
+### Still missing
+
+- Nothing is copied off the droplet, so someone with root could erase every log.
+- The report is not sent anywhere: read it with `journalctl` or from
+  `logs/security/`.
 
 ## TLS inspection (mitmproxy)
 
@@ -613,15 +723,15 @@ MCP server:
 
 Logging:
 - `SCANMALWARE_LOG_LEVEL` (default `INFO`; `MCP_LOG_LEVEL` is read as a fallback)
-- `SCANMALWARE_LOG_FILE` (default `/var/log/scanmalware-mcp/mcp.log`)
+- `SCANMALWARE_LOG_FILE` (unset: console only; Compose `/var/log/scanmalware-mcp/mcp.log`)
 - `SCANMALWARE_LOG_MAX_BYTES` (default `10485760`)
-- `SCANMALWARE_LOG_BACKUP_COUNT` (default `7`)
-- `SCANMALWARE_FULL_LOG_FILE` (default `/var/log/scanmalware-mcp/mcp-full.log`)
+- `SCANMALWARE_LOG_BACKUP_COUNT` (standalone default `7`; Compose default `30`)
+- `SCANMALWARE_FULL_LOG_FILE` (unset: no full log; Compose `/var/log/scanmalware-mcp/mcp-full.log`)
 - `SCANMALWARE_FULL_LOG_MAX_BYTES` (default `10485760`)
-- `SCANMALWARE_FULL_LOG_BACKUP_COUNT` (default `7`)
-- `SCANMALWARE_MCP_HTTP_LOG_FILE` (default `/var/log/scanmalware-mcp/mcp-http.log`)
+- `SCANMALWARE_FULL_LOG_BACKUP_COUNT` (standalone default `7`; Compose default `48`)
+- `SCANMALWARE_MCP_HTTP_LOG_FILE` (unset: no raw HTTP log; Compose `/var/log/scanmalware-mcp/mcp-http.log`)
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES` (default `10485760`)
-- `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT` (standalone default `7`; Compose default `63`)
+- `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT` (standalone default `7`; Compose default `112`)
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES` (default `1048576`, set `0` for unlimited)
 
 Proxy:

@@ -66,14 +66,17 @@ services:
       SCANMALWARE_CA_CERT: "${SCANMALWARE_CA_CERT:-/etc/scanmalware-certs/mitmproxy-ca-cert.pem}"
       SCANMALWARE_LOG_FILE: "${SCANMALWARE_LOG_FILE:-/var/log/scanmalware-mcp/mcp.log}"
       SCANMALWARE_LOG_MAX_BYTES: "${SCANMALWARE_LOG_MAX_BYTES:-10485760}"
-      SCANMALWARE_LOG_BACKUP_COUNT: "${SCANMALWARE_LOG_BACKUP_COUNT:-7}"
+      # About three months: mcp.log is the long-term record of tool calls, scan
+      # outcomes and upstream paths (~1-3 MB a day in October 2026).
+      SCANMALWARE_LOG_BACKUP_COUNT: "${SCANMALWARE_LOG_BACKUP_COUNT:-30}"
       SCANMALWARE_FULL_LOG_FILE: "${SCANMALWARE_FULL_LOG_FILE:-/var/log/scanmalware-mcp/mcp-full.log}"
       SCANMALWARE_FULL_LOG_MAX_BYTES: "${SCANMALWARE_FULL_LOG_MAX_BYTES:-10485760}"
-      SCANMALWARE_FULL_LOG_BACKUP_COUNT: "${SCANMALWARE_FULL_LOG_BACKUP_COUNT:-7}"
+      # About two weeks of full tool results (~32 MB a day); 7 backups kept two days.
+      SCANMALWARE_FULL_LOG_BACKUP_COUNT: "${SCANMALWARE_FULL_LOG_BACKUP_COUNT:-48}"
       SCANMALWARE_MCP_HTTP_LOG_FILE: "${SCANMALWARE_MCP_HTTP_LOG_FILE:-/var/log/scanmalware-mcp/mcp-http.log}"
       SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES: "${SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES:-10485760}"
-      # About a week at the observed traffic rate; bounded at 640 MiB total.
-      SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT: "${SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT:-63}"
+      # About two weeks at ~79 MB a day (October 2026), bounded at about 1.1 GiB.
+      SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT: "${SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT:-112}"
       SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES: "${SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES:-1048576}"
       # Optional auth for ScanMalware endpoints.
       SCANMALWARE_BEARER_TOKEN: "${SCANMALWARE_BEARER_TOKEN:-}"
@@ -90,6 +93,16 @@ services:
     networks:
       scanmalware_net:
         ipv4_address: 172.28.0.10
+    # The server reads its code and writes only to the logs bind mount, so the
+    # root filesystem is read-only and no Linux capabilities are needed (it runs
+    # as UID 10001 on port 8000). Limits what code execution in it could do.
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
     restart: unless-stopped
 
   nginx:
