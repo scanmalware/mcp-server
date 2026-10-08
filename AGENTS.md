@@ -76,8 +76,8 @@ Suggested initial tool set (public-only MVP):
 - `get_recent_scans(page=1, limit=20)`
 - `search_scans(...)` (wrap `GET /api/v1/search`)
 - `get_ai_analysis(scan_id)` (wrap `GET /api/v1/ai/{scan_id}`)
-- `get_screenshot(scan_id)` (resource; wraps `GET /api/v1/screenshot/{scan_id}`)
-- `download_certificate(scan_id)` (resource; wraps `GET /api/v1/tls/{scan_id}/certificate/download`)
+- `get_screenshot(scan_id)` (resource; wraps `GET /api/v1/screenshot/{scan_id}`). Built as the resource `scanmalware://screenshot/{scan_id}.png`.
+- `download_certificate(scan_id)` (resource; wraps `GET /api/v1/tls/{scan_id}/certificate/download`). Built as the resource `scanmalware://certificate/{scan_id}.pem`.
 
 Safety default (recommended): do not implement any behavior that fetches the target URL yourself; only forward to ScanMalware. Consider optionally rejecting obvious private/loopback targets (RFC1918, `localhost`) unless explicitly enabled.
 

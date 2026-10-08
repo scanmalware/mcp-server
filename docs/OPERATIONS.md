@@ -51,6 +51,11 @@ Host scanmalware-mcp
 - mitmproxy destination guard: `/opt/scanmalware-mcp/deploy/mitmproxy/restrict_hosts.py`
 - mitmproxy state (CA): `/opt/scanmalware-mcp/deploy/mitmproxy/state`
 - MCP source mount: `/opt/scanmalware-mcp/scanmalware_mcp` → `/app/scanmalware_mcp` (`PYTHONPATH=/app`)
+- Egress firewall: `/opt/scanmalware-mcp/deploy/iptables/lock-egress.sh` (rules in the `DOCKER-USER` chain)
+- Audit rules: `/etc/audit/rules.d/scanmalware-mcp.rules` (from `deploy/audit/`), log in `/var/log/audit/`
+- Security check: `/opt/scanmalware-mcp/deploy/security/security_check.py` (see [Security monitoring](#security-monitoring))
+- Files served but not in git, such as the `demo/` directory under the html root,
+  live only on the droplet; a [full redeploy](#full-redeploy) deletes them.
 
 ## HTTPS / TLS
 
@@ -758,7 +763,9 @@ The redeploy script stops all three containers (avoiding bind-mount inode
 issues), replaces everything under `/opt/scanmalware-mcp` except `logs/` while
 preserving the mitmproxy CA, then rebuilds and starts every image
 (`docker compose up -d --build`). Every service is down for the length of the
-rebuild. If the script is not on the droplet yet, run the legacy tar + docker
+rebuild. Files on the droplet that are not in git are deleted, for example
+anything put in the html root's `demo/` directory: copy them back afterwards, or
+use the MCP-only update below. If the script is not on the droplet yet, run the legacy tar + docker
 compose command once to install it.
 
 Optional one-shot helper from the repo root. It packs the working tree,
@@ -814,6 +821,10 @@ SH
 ```
 
 Then run the [smoke test](#mcp-endpoint) and the [egress check](#egress-restriction-scanmalware-only).
+
+Proxy addon changes (`deploy/mitmproxy/*.py`, bind-mounted single files) need no
+restart: written in place as above, mitmproxy reloads the script by itself
+(`docker logs deploy_proxy_1` shows "Loading script"), as it did on 2026-10-08.
 
 Rollback, using the backup and tag made above:
 

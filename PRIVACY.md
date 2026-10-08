@@ -13,9 +13,12 @@ Information We Collect
 - Connection data: IP address, user agent, the MCP client name and version your
   client reports when it connects, and timestamps. The Service issues no MCP
   session IDs.
-- Logs: tool names, durations, status codes, and (in full logs) arguments and
-  results. Raw HTTP logs may include request and response headers and bodies.
-  If you send Authorization headers, those values may be captured in raw logs.
+- Logs: tool names and arguments (long values shortened), durations, status
+  codes, the ScanMalware API paths each call requested, and scan outcomes
+  (submitted and final URL, visibility, status, risk). Full logs add complete
+  arguments and results. Raw HTTP logs may include request and response headers
+  and bodies. If you send Authorization headers, those values may be captured in
+  raw logs.
 - Proxy data: mitmproxy logs include upstream requests and responses to
   ScanMalware.com (including response bodies, usually base64 encoded).
 

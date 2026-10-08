@@ -274,7 +274,7 @@ ssh -i /path/to/key root@<droplet-ip> \
 ```
 The redeploy script stops all three containers, replaces the files, and rebuilds
 and restarts every image (`docker compose up -d --build`), preserving the mitmproxy
-CA. If the script is not on the droplet yet, run the legacy tar + docker compose
+CA. It deletes files on the droplet that are not in git (everything outside `logs/`). If the script is not on the droplet yet, run the legacy tar + docker compose
 command once to install it.
 
 Optional one-shot helper from the repo root (it packs the working tree, including
