@@ -424,6 +424,87 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
                 # Returns on the first terminal status: no extra polling for the verdict.
                 self.assertEqual(len(self.requests) - before, len(statuses))
 
+    async def test_calls_are_traced_upstream_and_in_the_log(self) -> None:
+        # The call ID joins mcp.log to mitmproxy's log (which records request
+        # headers), and the upstream paths in mcp.log show where a crafted
+        # argument actually went, long after the proxy log has rotated.
+        result = await self.call("get_domain_stats", domain="example.com/../../platform/stats")
+        self.assertFalse(result.get("isError"), result)
+        call_id = self.requests[-1].headers["x-mcp-call-id"]
+        start = [e for e in self.logged("mcp.tool.start") if e["tool"] == "get_domain_stats"][-1]
+        end = [e for e in self.logged("mcp.tool.end") if e["tool"] == "get_domain_stats"][-1]
+        self.assertEqual(start["call_id"], call_id)
+        self.assertEqual(end["call_id"], call_id)
+        self.assertEqual(
+            end["upstream"], ["GET /api/v1/domain/stats/example.com%2F..%2F..%2Fplatform%2Fstats 200"]
+        )
+        self.assertEqual(end["upstream_total"], 1)
+        # A different call gets a different ID.
+        await self.call("get_recent_scans")
+        self.assertNotEqual(self.requests[-1].headers["x-mcp-call-id"], call_id)
+
+    async def test_polling_and_failed_upstream_calls_are_summarised(self) -> None:
+        replies = iter(["processing", "processing", "completed"])
+        self.route = lambda request: httpx.Response(
+            200, json={"scan_id": self.SCAN_ID, "status": next(replies), "security_verdict": {}}
+        )
+        await self.call("wait_for_scan", scan_id=self.SCAN_ID, poll_interval_s=0.01)
+        end = [e for e in self.logged("mcp.tool.end") if e["tool"] == "wait_for_scan"][-1]
+        self.assertEqual(end["upstream"], [f"GET /api/v1/scan/{self.SCAN_ID}/summary 200 x3"])
+        self.assertEqual(end["upstream_total"], 3)
+        self.route = None
+        self.upstream_timeout = True
+        await self.call("get_favicon_stats")
+        error = [e for e in self.logged("mcp.tool.error") if e["tool"] == "get_favicon_stats"][-1]
+        self.assertEqual(error["upstream"], ["GET /api/v1/favicon/stats error:ReadTimeout"])
+
+    async def test_scan_outcomes_and_internal_targets_are_logged(self) -> None:
+        # The redirect-to-127.0.0.1 scans of 2026-10-02 were only provable from
+        # the raw HTTP log, which rotates out after about a week.
+        def summary(final_url: str, redirects: list[dict] | None = None) -> httpx.Response:
+            body = {
+                "scan_id": self.SCAN_ID,
+                "url": "https://httpbin.org/redirect-to?url=http%3A%2F%2F127.0.0.1%2F",
+                "final_url": final_url,
+                "status": "completed",
+                "redirect_count": 1,
+                "risk_score": 0,
+                "security_verdict": {"risk_level": "low"},
+            }
+            if redirects is not None:
+                body["redirects"] = redirects
+            return httpx.Response(200, json=body)
+
+        self.route = lambda request: summary("http://127.0.0.1/")
+        await self.call("get_scan_summary", scan_id=self.SCAN_ID)
+        outcome = self.logged("mcp.scan.outcome")[-1]
+        self.assertEqual(
+            (outcome["tool"], outcome["final_url"], outcome["status"], outcome["risk_level"]),
+            ("get_scan_summary", "http://127.0.0.1/", "completed", "low"),
+        )
+        warning = self.logged("mcp.scan.internal_target")[-1]
+        self.assertEqual(warning["internal_hosts"], ["127.0.0.1"])
+        self.assertEqual(warning["call_id"], outcome["call_id"])
+        # A redirect through the metadata address is caught even if the final URL is public.
+        self.route = lambda request: summary(
+            "https://example.com/", [{"from": "https://x.test/", "to": "http://169.254.169.254/"}]
+        )
+        await self.call("get_scan_result", scan_id=self.SCAN_ID)
+        self.assertEqual(self.logged("mcp.scan.internal_target")[-1]["internal_hosts"], ["169.254.169.254"])
+        warnings = len(self.logged("mcp.scan.internal_target"))
+        self.route = lambda request: summary("https://example.com/")
+        await self.call("get_scan_summary", scan_id=self.SCAN_ID)
+        self.assertEqual(len(self.logged("mcp.scan.internal_target")), warnings)
+
+    async def test_submissions_log_their_target_and_visibility(self) -> None:
+        self.route = lambda request: httpx.Response(200, json={"scan_id": self.SCAN_ID, "status": "queued"})
+        await self.call("submit_scan", url="https://example.com/login", scan_type="unlisted")
+        outcome = self.logged("mcp.scan.outcome")[-1]
+        self.assertEqual(
+            (outcome["tool"], outcome["scan_id"], outcome["url"], outcome["scan_type"], outcome["status"]),
+            ("submit_scan", self.SCAN_ID, "https://example.com/login", "unlisted", "queued"),
+        )
+
     async def test_free_text_path_values_stay_in_their_segment(self) -> None:
         # Raw interpolation let httpx resolve "..": this domain reached
         # /api/v1/domain/platform/stats in production on 2026-10-02.
