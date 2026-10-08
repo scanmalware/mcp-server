@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Daily security report for the ScanMalware MCP droplet.
+"""On-demand security check for the ScanMalware MCP droplet.
 
-Reads the last day of logs and prints findings, most serious first:
+Reads the last --hours of logs (default 24) and prints findings, most serious
+first. It writes nothing and is not scheduled; run it to answer "did anything
+get through?":
   HIGH    signs that an attack worked or that something is wrong with the host
   MEDIUM  attack attempts, and responses nobody should have been served
   INFO    context: restarts, deploy changes, logins, error counts
-
-Lines carry sd-daemon priority prefixes, so under systemd the journal records HIGH
-as err and MEDIUM as warning (journalctl -t scanmalware-security -p warning).
-The report is also written to logs/security/report-<date>.txt.
 
 Standard library only; runs as root on the host. See docs/OPERATIONS.md,
 "Security monitoring".
@@ -19,7 +17,6 @@ import argparse
 import datetime as dt
 import glob
 import gzip
-import ipaddress
 import json
 import os
 import re
@@ -27,8 +24,6 @@ import subprocess
 import sys
 from collections import Counter, defaultdict
 from typing import Any, Iterator
-
-PRIORITY = {"HIGH": "<3>", "MEDIUM": "<4>", "INFO": "<6>"}
 
 # Injection-style tool arguments, as seen in the October 2026 log review:
 # shell commands in scan_id, file:// and metadata URLs, traversal, prompt text.
@@ -274,31 +269,13 @@ def check_audit(report: Report, since: float) -> None:
             report.add(severity, f"changes to {label}: {dict(names.most_common(8))}")
 
 
-def check_ssh(report: Report, since: float, allowlist_path: str) -> None:
+def check_ssh(report: Report, since: float) -> None:
+    # Logins are listed, not judged: any source address is allowed (key-only login).
     out = run(["journalctl", "-u", "ssh", "--since", f"@{int(since)}", "--no-pager", "-o", "cat"])
     accepted = Counter(re.findall(r"Accepted \S+ for (\S+) from (\S+)", out))
     failed = len(re.findall(r"Invalid user|Failed \S+ for|Connection closed by authenticating", out))
-    allowed: set[str] = set()
-    if os.path.exists(allowlist_path):
-        with open(allowlist_path, encoding="utf-8") as handle:
-            allowed = {line.split("#")[0].strip() for line in handle if line.split("#")[0].strip()}
-
-    def known(ip: str) -> bool:
-        for entry in allowed:
-            try:
-                if ipaddress.ip_address(ip) in ipaddress.ip_network(entry, strict=False):
-                    return True
-            except ValueError:
-                continue
-        return False
-
     for (user, ip), count in accepted.most_common():
-        if allowed and not known(ip):
-            report.add("HIGH", f"SSH login as {user} from {ip} ({count}x), which is not in {allowlist_path}")
-        else:
-            report.add("INFO", f"SSH login as {user} from {ip} ({count}x)")
-    if not allowed and accepted:
-        report.add("INFO", f"no SSH allowlist at {allowlist_path}, so logins are listed but not judged")
+        report.add("INFO", f"SSH login as {user} from {ip} ({count}x)")
     report.add("INFO", f"{failed} failed or invalid SSH attempts (password login is disabled)")
 
 
@@ -348,9 +325,6 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--hours", type=float, default=24.0, help="how far back to look (default 24)")
     parser.add_argument("--root", default="/opt/scanmalware-mcp")
-    parser.add_argument("--report-dir", default=None, help="default: <root>/logs/security")
-    parser.add_argument("--ssh-allowlist", default="/etc/scanmalware-mcp/ssh-allowlist")
-    parser.add_argument("--keep", type=int, default=90, help="reports to keep (default 90)")
     args = parser.parse_args()
 
     now = dt.datetime.now(dt.timezone.utc)
@@ -361,7 +335,7 @@ def main() -> int:
         lambda: check_proxy(report, args.root, since),
         lambda: check_kernel(report, since),
         lambda: check_audit(report, since),
-        lambda: check_ssh(report, since, args.ssh_allowlist),
+        lambda: check_ssh(report, since),
         lambda: check_nginx(report, args.root, since),
         lambda: check_containers(report, since),
     ):
@@ -372,18 +346,10 @@ def main() -> int:
 
     lines = report.lines()
     counts = Counter(severity for severity, _ in lines)
-    header = (f"ScanMalware MCP security report, {args.hours:g} h to {now:%Y-%m-%d %H:%M}Z: "
-              f"{counts['HIGH']} high, {counts['MEDIUM']} medium, {counts['INFO']} info")
-    print(f"{PRIORITY['HIGH' if counts['HIGH'] else 'INFO']}{header}")
+    print(f"ScanMalware MCP security check, {args.hours:g} h to {now:%Y-%m-%d %H:%M}Z: "
+          f"{counts['HIGH']} high, {counts['MEDIUM']} medium, {counts['INFO']} info")
     for severity, text in lines:
-        print(f"{PRIORITY[severity]}{severity}: {text}")
-
-    report_dir = args.report_dir or os.path.join(args.root, "logs/security")
-    os.makedirs(report_dir, exist_ok=True)
-    with open(os.path.join(report_dir, f"report-{now:%Y-%m-%d}.txt"), "w", encoding="utf-8") as handle:
-        handle.write(header + "\n" + "".join(f"{severity}: {text}\n" for severity, text in lines))
-    for old in sorted(glob.glob(os.path.join(report_dir, "report-*.txt")))[:-args.keep]:
-        os.remove(old)
+        print(f"{severity}: {text}")
     return 0
 
 

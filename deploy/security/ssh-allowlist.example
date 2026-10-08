@@ -1,6 +1,0 @@
-# SSH source addresses or networks expected to log in as root, one per line.
-# Install as /etc/scanmalware-mcp/ssh-allowlist (not in git: it names your own
-# addresses). With it, the daily security report raises a HIGH finding for any
-# login from elsewhere; without it, logins are only listed.
-# 203.0.113.7
-# 198.51.100.0/24

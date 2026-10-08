@@ -580,37 +580,36 @@ code and writes only to the logs bind mount, so none of this changes its
 behaviour, but code running in it cannot modify the image, run files it drops
 in `/tmp`, or gain privileges.
 
-### Daily security report
+### Security check (on demand)
 
-`deploy/security/daily_report.py` reads the last 24 hours of all of the above
-and writes findings, most serious first, to the journal and to
-`logs/security/report-<date>.txt` (90 kept). It runs every day at 06:15 UTC.
+`deploy/security/security_check.py` reads the last `--hours` (default 24) of all
+of the above and prints findings, most serious first. It is not scheduled and
+writes nothing; run it when you want to know whether anything got through:
+
+```bash
+mcpssh "python3 /opt/scanmalware-mcp/deploy/security/security_check.py --hours 24"
+```
 
 - HIGH: a scan reached an internal host; the proxy or firewall refused
   container traffic; a program ran as the container user; root's SSH keys or the
-  SSH config changed; a login came from an address not on the allowlist; a
+  SSH config changed; audit rules were removed or auditing switched off; a
   container was killed for running out of memory.
 - MEDIUM: injection-style tool arguments (by client); a successful upstream
   request for an encoded or dot path segment; nginx serving a 2xx for a path
   other than the landing page, `/mcp`, `/.well-known/` or `/demo/`.
 - INFO: counts of calls, errors, cancellations and sessions by client;
-  restarts; deploy changes; SSH logins and failed attempts.
+  restarts; audit rule loads; deploy changes; SSH logins (any source address is
+  allowed) and failed attempts.
 
-```bash
-mcpssh "bash /opt/scanmalware-mcp/deploy/security/install.sh"       # once
-mcpssh "journalctl -t scanmalware-security -p warning --since -2d"   # HIGH and MEDIUM
-mcpssh "python3 /opt/scanmalware-mcp/deploy/security/daily_report.py --hours 6"   # ad hoc
-```
+A `docker exec` into `deploy_mcp_1` runs as UID 10001 and is reported as HIGH,
+like code execution in the container would be.
 
-To judge SSH logins rather than only list them, put the expected source
-addresses in `/etc/scanmalware-mcp/ssh-allowlist` (format in
-`deploy/security/ssh-allowlist.example`; not in git).
+### Decided against (October 2026)
 
-### Still missing
-
-- Nothing is copied off the droplet, so someone with root could erase every log.
-- The report is not sent anywhere: read it with `journalctl` or from
-  `logs/security/`.
+- Copying logs off the droplet: they stay on the host, so someone with root
+  could erase them.
+- Scheduled reports or alerts: run the check above instead.
+- An SSH source allowlist: logins are key-only and allowed from any address.
 
 ## TLS inspection (mitmproxy)
 
