@@ -1,5 +1,5 @@
 Privacy Policy
-Last updated: 2026-10-02
+Last updated: 2026-10-08
 
 This Privacy Policy describes how the ScanMalware MCP server ("Service")
 collects, uses, and shares information when you access or use the Service.
@@ -10,7 +10,9 @@ Overview
 
 Information We Collect
 - Request data: URLs, scan_id values, and other tool parameters you submit.
-- Connection data: IP address, user agent, MCP session ID, and timestamps.
+- Connection data: IP address, user agent, the MCP client name and version your
+  client reports when it connects, and timestamps. The Service issues no MCP
+  session IDs.
 - Logs: tool names, durations, status codes, and (in full logs) arguments and
   results. Raw HTTP logs may include request and response headers and bodies.
   If you send Authorization headers, those values may be captured in raw logs.

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-This repo will contain a Python **Model Context Protocol (MCP)** server that exposes the **ScanMalware.com** API as tools/resources for an MCP client.
+This repo contains a Python **Model Context Protocol (MCP)** server that exposes the **ScanMalware.com** API as tools/resources for an MCP client (128 tools on mcp 2.3.0, served at `https://mcp.scanmalware.com/mcp`; operations in `docs/OPERATIONS.md`). The sections below are the original design notes; where they differ from the code, the code and the runbook are current.
 
 ## API source of truth
 
@@ -34,11 +34,13 @@ Most endpoints are public (no auth in OpenAPI). Auth-gated endpoints in the spec
   - `GET /api/v1/modules/percentiles/{module_name}`
   - `POST /api/v1/modules/admin/change-password`
 
-Recommended env vars (never hardcode secrets):
+The server deliberately exposes none of these auth-gated or `/modules/*`
+endpoints, so it needs no Basic credentials.
+
+Env vars (never hardcode secrets; full list in `docs/OPERATIONS.md`):
 
 - `SCANMALWARE_BASE_URL` (default: `https://scanmalware.com`)
-- `SCANMALWARE_BEARER_TOKEN` (optional; only needed for auth endpoints)
-- `SCANMALWARE_BASIC_USER` / `SCANMALWARE_BASIC_PASSWORD` (optional; only needed for `/modules/*`)
+- `SCANMALWARE_BEARER_TOKEN` (optional; needed for `private` scans)
 
 ## Core scan workflow (API-level)
 

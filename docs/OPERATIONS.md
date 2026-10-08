@@ -290,7 +290,8 @@ cryptography, HPACK and ASN.1 updates were applied.
 Two files are persisted on the host and survive redeploys:
 
 - Sanitized log: `/opt/scanmalware-mcp/logs/mcp/mcp.log`
-  - Includes tool/resource start/end, args (sanitized), timing, client name/version, and IP fields.
+  - Includes session starts (client name/version, protocol version), tool/resource
+    start/end/error/cancelled, args (sanitized), timing, user agent and IP fields.
 - Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log`
   - Includes full tool args and full tool results (no redaction).
 
@@ -311,8 +312,9 @@ Process and session lifecycle events:
   Discovery is optional in 2026-07-28, so treat the second number as a lower
   bound.
 - `mcp.lifespan.enter` (DEBUG, not written at the default INFO level) fires
-  for every HTTP request, because the SDK runs the lifespan per request under
-  `stateless_http`.
+  when the SDK enters the server lifespan: once per process for streamable HTTP
+  under mcp 2.x, once per connection for SSE. Under mcp 1.30 it ran for every
+  HTTP request.
 
 Count sessions, and the clients behind them, for one log file:
 
@@ -351,7 +353,10 @@ the active file), or 7 backups for the standalone server. Controlled by:
 - Access log: `/opt/scanmalware-mcp/logs/nginx/access.log`
 - Error log: `/opt/scanmalware-mcp/logs/nginx/error.log`
 
-The access log includes client IPs and MCP session IDs.
+The access log includes client IPs, the Host header and TLS details. Its
+`mcp_session` field is always `-`: the server is stateless and issues no
+`mcp-session-id`. Requests for other domains are closed by the default servers
+(444, or a refused TLS handshake, which is logged only in the error log).
 
 ### mitmproxy logs
 
@@ -560,16 +565,17 @@ with open(log_path, 'r', encoding='utf-8') as fh:
             data = json.loads(line[start:])
         except json.JSONDecodeError:
             continue
-        # One per session, with the client's own name from initialize.
-        if data.get('event') == 'mcp.session.start' and data.get('method') == 'initialize':
+        # One per session (initialize, or server/discover from 2026-07-28
+        # clients), with the client's own name.
+        if data.get('event') == 'mcp.session.start':
             session_clients[data.get('client_name') or '?'] += 1
         if data.get('event') == 'mcp.tool.start':
             tool = data.get('tool')
             if tool:
                 tool_counts[tool] += 1
-            # client_name/client_version are null under stateless_http: the
-            # initialize params are not retained across requests. Group by the
-            # User-Agent header instead, which is logged on every tool call.
+            # client_name/client_version are null for 2025-protocol clients
+            # under stateless_http: their initialize params are not retained.
+            # Group by the User-Agent header, which is logged on every tool call.
             agent = data.get('user_agent')
             if agent:
                 client_pairs[agent] += 1
@@ -603,9 +609,10 @@ MCP server:
 - `MCP_PORT` (default `8000`)
 - `MCP_AUTH_TOKEN` (optional)
 - `MCP_RESOURCE_SERVER_URL` / `MCP_ISSUER_URL` (optional; used when `MCP_AUTH_TOKEN` is set)
+- `MCP_SSE_MOUNT_PATH` (optional; path prefix for `MCP_TRANSPORT=sse`)
 
 Logging:
-- `SCANMALWARE_LOG_LEVEL` (default `INFO`)
+- `SCANMALWARE_LOG_LEVEL` (default `INFO`; `MCP_LOG_LEVEL` is read as a fallback)
 - `SCANMALWARE_LOG_FILE` (default `/var/log/scanmalware-mcp/mcp.log`)
 - `SCANMALWARE_LOG_MAX_BYTES` (default `10485760`)
 - `SCANMALWARE_LOG_BACKUP_COUNT` (default `7`)
@@ -623,23 +630,102 @@ Proxy:
 
 ## Deploy / redeploy
 
-In-place update on the existing droplet:
+Deploy a commit that is on `main`, packaged with `git archive`. A tar of the
+working tree also ships untracked files (`.tools/`, caches, egg-info) and
+uncommitted edits, and prod then matches no commit.
+
+### Full redeploy
 
 ```bash
-tar --exclude=.git --exclude=.venv --exclude=__pycache__ -czf /tmp/scanmalware-mcp.tar.gz -C . .
+git archive --format=tar.gz -o /tmp/scanmalware-mcp.tar.gz origin/main
 scp -i "$MCP_SSH_KEY" /tmp/scanmalware-mcp.tar.gz "root@$MCP_HOST:/tmp/"
 mcpssh \
   "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
-The redeploy script stops containers before swapping files to avoid bind-mount inode issues.
-If the script is not on the droplet yet, run the legacy tar + docker compose command once to install it.
 
-Optional one-shot helper from the repo root:
+The redeploy script stops all three containers (avoiding bind-mount inode
+issues), replaces everything under `/opt/scanmalware-mcp` except `logs/` while
+preserving the mitmproxy CA, then rebuilds and starts every image
+(`docker compose up -d --build`). Every service is down for the length of the
+rebuild. If the script is not on the droplet yet, run the legacy tar + docker
+compose command once to install it.
+
+Optional one-shot helper from the repo root. It packs the working tree,
+uncommitted changes included, rather than a commit:
+
 ```bash
 ./deploy/push-redeploy.sh "root@$MCP_HOST" "$MCP_SSH_KEY"
 ```
 
-Rolling deploy (new droplet):
+### Code and image must match
+
+`scanmalware_mcp/` is bind-mounted over the image (`PYTHONPATH=/app`): the
+running code comes from `/opt/scanmalware-mcp/scanmalware_mcp`, its
+dependencies from the image. Copying `server.py` and restarting `deploy_mcp_1`
+is enough only when `requirements.lock` is unchanged. When the lock changes,
+rebuild the image. For example, `server.py` from before 2d124a3 (the move to
+mcp 2.3.0) fails to import on the current image, and newer code fails on an
+older image.
+
+### Updating only the MCP server
+
+This rebuilds and recreates only `deploy_mcp_1`, leaving Nginx and the proxy
+running. It was used for 2d124a3 on 2026-10-08, with about 5 seconds of
+downtime. Upload the bundle as in [Full redeploy](#full-redeploy), then:
+
+```bash
+mcpssh <<'SH'
+set -euo pipefail
+free -m                          # build only with a few hundred MB available
+cd /opt/scanmalware-mcp
+REV=<short commit id>
+B="/root/deploy-backup-$(date +%F)-pre-$REV"
+mkdir -p "$B"
+tar -cf "$B/files.tar" scanmalware_mcp pyproject.toml requirements.lock deploy/nginx/nginx.conf
+# Compose runs the image tagged security-20261002; keep the current one for rollback.
+docker tag scanmalware-mcp:security-20261002 "scanmalware-mcp:rollback-pre-$REV"
+
+# Build from a staged copy, so the live tree is untouched until the image exists.
+rm -rf "/tmp/deploy-$REV" && mkdir "/tmp/deploy-$REV"
+tar -xzf /tmp/scanmalware-mcp.tar.gz -C "/tmp/deploy-$REV"
+(cd "/tmp/deploy-$REV" && nice docker build -q -t scanmalware-mcp:security-20261002 .)
+
+# cp writes into existing files, keeping nginx.conf's inode: it is a single-file
+# bind mount, and a replaced file would be invisible to the running container.
+inode=$(stat -c %i deploy/nginx/nginx.conf)
+cp -a "/tmp/deploy-$REV/." .
+[ "$inode" = "$(stat -c %i deploy/nginx/nginx.conf)" ] || echo "nginx.conf inode changed: restart nginx"
+
+docker compose -f deploy/docker-compose.yml up -d --no-deps mcp
+docker exec deploy_nginx_1 nginx -t && docker exec deploy_nginx_1 nginx -s reload
+grep '"mcp.startup"' logs/mcp/mcp.log | tail -1   # expect "ca_cert_loaded": true
+SH
+```
+
+Then run the [smoke test](#mcp-endpoint) and the [egress check](#egress-restriction-scanmalware-only).
+
+Rollback, using the backup and tag made above:
+
+```bash
+mcpssh <<'SH'
+set -euo pipefail
+cd /opt/scanmalware-mcp
+REV=<short commit id>
+docker tag "scanmalware-mcp:rollback-pre-$REV" scanmalware-mcp:security-20261002
+inode=$(stat -c %i deploy/nginx/nginx.conf)
+# GNU tar on the droplet writes into existing files, keeping the inode.
+tar -xf "/root/deploy-backup-<date>-pre-$REV/files.tar"
+docker compose -f deploy/docker-compose.yml up -d --no-deps mcp
+if [ "$inode" = "$(stat -c %i deploy/nginx/nginx.conf)" ]; then
+  docker exec deploy_nginx_1 nginx -t && docker exec deploy_nginx_1 nginx -s reload
+else
+  docker compose -f deploy/docker-compose.yml restart nginx
+fi
+SH
+```
+
+### Rolling deploy (new droplet)
+
 1) Create a new droplet (same region/size/OS)
 2) Deploy the same bundle
 3) Update DNS to new IP
@@ -681,6 +767,6 @@ doctl compute firewall create \
 
 - Auth-gated endpoints and `/modules/*` tools are removed from the MCP server.
 - Upstream-disabled endpoints are excluded (e.g., `get_improvements`, `find_screenshot_duplicates`, `get_ai_stats`, `search_js_fingerprinter2_code_hash`, `search_js_segments_by_tlsh`).
-- Some search tools require at least one filter and return a validation error if none are provided.
+- Every search tool works with its defaults; `search_js_fingerprint_patterns` applies `has_eval=true` when given no filter, because the API requires one.
 - Cloudflare proxying is disabled for `mcp.scanmalware.com`.
 - The MCP server is public; set `MCP_AUTH_TOKEN` if you want to restrict access.

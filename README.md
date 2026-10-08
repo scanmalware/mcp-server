@@ -55,18 +55,25 @@ MCP server security env vars:
 
 Transport note: the HTTP transports run stateless (`stateless_http=True`), so responses carry
 no `mcp-session-id` header. Clients must not require one. This keeps per-session state -
-and therefore memory - flat.
+and therefore memory - flat. Both MCP protocol generations are served: `initialize`
+(2024-11-05 to 2025-11-25) and `server/discover` (2026-07-28). Requests use POST;
+GET on `/mcp` returns 405 because the server offers no standalone SSE stream.
+
+SSE transport: set `MCP_TRANSPORT=sse`, and optionally `MCP_SSE_MOUNT_PATH` to serve
+it under a path prefix.
 
 Tool note: `submit_scan` does not call `/api/v1/csrf-token`; there is no CSRF token tool.
 Tool note: some upstream endpoints are disabled and excluded from the tool list (e.g., `get_improvements`, `find_screenshot_duplicates`, `get_ai_stats`, `search_js_fingerprinter2_code_hash`, `search_js_segments_by_tlsh`).
-Some search tools require at least one filter and will raise a validation error if none are provided.
-`search_js_fingerprint_patterns` needs one of its boolean filters;
-`search_js_obfuscation` needs `risk_level`, `min_risk_score`, or `has_eval`;
-`search_js_malware_families` needs `min_cluster_size` or `similarity_threshold`.
-Setting only `limit` does not satisfy these requirements. OCR search requires
-at least three characters after trimming. Library lookups use detected identifiers
-from `get_js_library_inventory`; `search_js_fingerprint_by_library` accepts
-`Next.js` as an alias for the detected identifier `nextjs`.
+Filters: every search tool can be called with its defaults.
+`search_js_fingerprint_patterns` applies `has_eval=true` when no pattern filter
+is given, because the API requires one; `search_js_obfuscation` and
+`search_js_malware_families` fall back to the API's own defaults. Score filters
+use the API's scales and are checked before the request: the AI risk score is
+0-10, AI confidence 0-100, JS obfuscation scores 0-1 and the runtime JS risk
+score 0-100. OCR search requires at least three characters after trimming.
+Library lookups use detected identifiers from `get_js_library_inventory`;
+`search_js_fingerprint_by_library` accepts `Next.js` as an alias for the
+detected identifier `nextjs`.
 
 ## Scan visibility
 
@@ -165,7 +172,9 @@ See [the operations runbook](docs/OPERATIONS.md#security-maintenance) for pinned
 ### Upload and run
 
 ```bash
-tar --exclude=.git --exclude=.venv --exclude=__pycache__ -czf /tmp/scanmalware-mcp.tar.gz -C . .
+# Package exactly one commit; a tar of the working tree also picks up untracked
+# files (.tools/, caches, egg-info) and uncommitted edits.
+git archive --format=tar.gz -o /tmp/scanmalware-mcp.tar.gz origin/main
 scp -i /path/to/key /tmp/scanmalware-mcp.tar.gz root@<droplet-ip>:/tmp/
 ssh -i /path/to/key root@<droplet-ip> \
   "mkdir -p /opt/scanmalware-mcp && tar -xzf /tmp/scanmalware-mcp.tar.gz -C /opt/scanmalware-mcp"
@@ -256,18 +265,26 @@ Two common flows:
 
 1) In-place update (same droplet)
 ```bash
-tar --exclude=.git --exclude=.venv --exclude=__pycache__ -czf /tmp/scanmalware-mcp.tar.gz -C . .
+# Package exactly one commit; a tar of the working tree also picks up untracked
+# files (.tools/, caches, egg-info) and uncommitted edits.
+git archive --format=tar.gz -o /tmp/scanmalware-mcp.tar.gz origin/main
 scp -i /path/to/key /tmp/scanmalware-mcp.tar.gz root@<droplet-ip>:/tmp/
 ssh -i /path/to/key root@<droplet-ip> \
   "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
-The redeploy script stops containers before swapping files to avoid bind-mount inode issues.
-If the script is not on the droplet yet, run the legacy tar + docker compose command once to install it.
+The redeploy script stops all three containers, replaces the files, and rebuilds
+and restarts every image (`docker compose up -d --build`), preserving the mitmproxy
+CA. If the script is not on the droplet yet, run the legacy tar + docker compose
+command once to install it.
 
-Optional one-shot helper from the repo root:
+Optional one-shot helper from the repo root (it packs the working tree, including
+uncommitted changes, rather than a commit):
 ```bash
 ./deploy/push-redeploy.sh root@<droplet-ip> /path/to/key
 ```
+
+To update only the MCP server with a few seconds of downtime, see
+[Updating only the MCP server](docs/OPERATIONS.md#updating-only-the-mcp-server).
 
 2) Rolling deploy (new droplet)
 - Create a new droplet (steps above)
