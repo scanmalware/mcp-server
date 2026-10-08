@@ -433,20 +433,27 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         return await self.client.send(request)
 
     async def test_wildcard_accept_headers_are_served(self) -> None:
-        # The SDK wants both literal types; these accept both but got 406.
+        # mcp 1.30 wanted both literal types, so these got 406 although they
+        # accept both: 942 POSTs in one week from one aiohttp client alone.
         listing = {"jsonrpc": "2.0", "id": 99, "method": "tools/list"}
-        for accept in ("*/*", None, "application/*, text/*", "*/*;q=0.8"):
+        for accept in ("*/*", "application/*, text/*", "*/*;q=0.8"):
             with self.subTest(accept=accept):
                 response = await self.raw_post(listing, accept)
                 self.assertEqual(response.status_code, 200, response.text)
         # Headers that exclude one of the types are still refused.
-        for accept in ("application/json", "text/event-stream", "text/html", "*/*;q=0"):
+        for accept in ("application/json", "text/event-stream", "text/html"):
             with self.subTest(accept=accept):
                 response = await self.raw_post(listing, accept)
                 self.assertEqual(response.status_code, 406, response.text)
-        # GET is not widened: an accepted GET opens a standing SSE stream.
-        response = await self.client.get("/mcp", headers={"accept": "*/*"})
-        self.assertEqual(response.status_code, 406)
+
+    async def test_get_offers_no_stream(self) -> None:
+        # mcp 2.x accepts */* on GET and holds the stream open until the client
+        # leaves; the server sends nothing on it, so it answers 405 instead.
+        for accept in ("*/*", "text/event-stream", "text/html,application/xhtml+xml,*/*;q=0.8"):
+            with self.subTest(accept=accept):
+                response = await asyncio.wait_for(self.client.get("/mcp", headers={"accept": accept}), timeout=5)
+                self.assertEqual(response.status_code, 405)
+                self.assertEqual(response.headers["allow"], "POST")
 
     def logged(self, event: str) -> list[dict]:
         return [call.kwargs for call in module._log_event.call_args_list if call.args[1] == event]
@@ -487,6 +494,44 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ServerInternalsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_production_host_header_is_accepted(self) -> None:
+        # Production binds 0.0.0.0 behind nginx, which forwards
+        # Host: mcp.scanmalware.com. The SDK switches on DNS-rebinding protection
+        # (a localhost-only Host list) only for localhost binds.
+        upstream = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json={})),
+            base_url="https://scanmalware.com",
+        )
+        self.addAsyncCleanup(upstream.aclose)
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(module, "_configure_logging"))
+            stack.enter_context(patch.object(module, "_log_event"))
+            stack.enter_context(patch.dict("os.environ", {}, clear=True))
+            stack.enter_context(
+                patch.object(module, "_get_shared_client", new=AsyncMock(return_value=(upstream, "https://scanmalware.com")))
+            )
+            server = module.create_server(host="0.0.0.0", port=8000)
+            app = server.streamable_http_app()
+            async with server.session_manager.run():
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="https://mcp.scanmalware.com"
+                ) as client:
+                    response = await client.post(
+                        "/mcp",
+                        headers={"accept": "application/json, text/event-stream", "x-real-ip": "203.0.113.7"},
+                        json={
+                            "jsonrpc": "2.0",
+                            "id": 1,
+                            "method": "initialize",
+                            "params": {
+                                "protocolVersion": "2025-06-18",
+                                "capabilities": {},
+                                "clientInfo": {"name": "prod-shape", "version": "1"},
+                            },
+                        },
+                    )
+        self.assertEqual(response.status_code, 200, response.text)
+
     async def test_cancelled_tool_calls_are_logged(self) -> None:
         # A client that disconnects mid-call cancels the tool. CancelledError is a
         # BaseException, so it used to leave a start event and nothing else.

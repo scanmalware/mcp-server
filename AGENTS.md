@@ -87,11 +87,11 @@ Safety default (recommended): do not implement any behavior that fetches the tar
 - Pros:
   - Reference SDK; best MCP compatibility.
   - Multiple transports available (stdio, SSE, streamable HTTP, websocket, ASGI transport helpers).
-  - Includes `mcp.server.fastmcp` for ergonomic tool/resource definitions while staying “official”.
+  - Includes `mcp.server.mcpserver.MCPServer` (named `FastMCP` in `mcp.server.fastmcp` before 2.0) for ergonomic tool/resource definitions while staying “official”.
 - Cons:
   - Auto-generating a tool per OpenAPI operation can create an unwieldy server; curate or group tools.
 
-Recommendation: use `mcp.server.fastmcp.FastMCP` for a curated tool set, and run it in Docker via an HTTP-capable transport (or stdio for local use).
+Recommendation: use `mcp.server.mcpserver.MCPServer` (mcp 2.x; this server runs 2.3.0) for a curated tool set, and run it in Docker via an HTTP-capable transport (or stdio for local use).
 
 ### Option B: `fastmcp`
 

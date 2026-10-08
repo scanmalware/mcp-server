@@ -77,12 +77,20 @@ certbot renew
 ## MCP endpoint
 
 - MCP endpoint: `https://mcp.scanmalware.com/mcp`
-- The HTTP transport expects `Accept: application/json, text/event-stream`. On
-  POST, a header whose media ranges already cover both (`*/*`,
-  `application/*, text/*`) or no `Accept` header at all is spelled out to that
-  before the SDK checks it; until October 2026 those got 406. A header that
-  excludes either type is still refused. GET is unchanged and needs
-  `text/event-stream`, because an accepted GET opens a standing SSE stream.
+- POST must accept both `application/json` and `text/event-stream`. Since the
+  mcp 2.x migration, wildcard ranges such as `*/*` or `application/*, text/*`
+  count; mcp 1.30 wanted the literal types and answered those with 406 (about
+  1,200 POSTs a week by October 2026). A missing `Accept` header, or one that
+  excludes either type, still gets 406.
+- GET on `/mcp` answers **405** (`Allow: POST`): the server sends no
+  server-initiated messages, so it offers no standalone SSE stream. mcp 2.x
+  would otherwise accept `*/*` on GET and hold the stream open until the client
+  left, so every browser or health check that fetched `/mcp` pinned a
+  connection.
+- Both protocol generations are served: `initialize` with 2024-11-05 to
+  2025-11-25, and `server/discover` plus per-request `_meta` with 2026-07-28
+  (Claude.ai and recent Claude Code). mcp 1.30 answered the latter with 400
+  "Unsupported protocol version" and the clients fell back to `initialize`.
 - `submit_scan` does not call `/api/v1/csrf-token` (no CSRF token tool).
 
 Minimal smoke test:
@@ -156,17 +164,28 @@ The server is built with `stateless_http=True`, so:
 This was a deliberate change. With the old SDK, stateful mode never evicted entries from `_server_instances`,
 so every session leaked a
 `StreamableHTTPServerTransport` + `ServerSession` (~77 KB) for the life of the
-process. MCP 1.30.0 adds session reclamation, but this server continues to use
-stateless mode. Measured with the old SDK over 600 sessions: stateful grew ~41 MB and kept climbing,
-stateless stayed flat at ~75 MB RSS. The server sends no server-initiated
-notifications, so it gives up nothing it actually used.
+process. MCP 1.30.0 added session reclamation and 2.x caps stateful sessions
+(30 minutes idle, 10,000 at most), but this server continues to use stateless
+mode. Measured with the old SDK over 600 sessions: stateful grew ~41 MB and kept climbing,
+stateless stayed flat at ~75 MB RSS; under mcp 2.3.0 RSS stayed flat (81 → 76 MB)
+over 8,000 mixed requests. The server sends no server-initiated notifications,
+so it gives up nothing it actually used.
+
+Under mcp 2.x `stateless_http` is no longer a constructor argument: it is passed
+to `run()` and `streamable_http_app()`, which default to stateful. The server
+class keeps it as a property and passes it on, so do not call the SDK's app
+factories directly. It also sets `subscriptions=False`; otherwise 2.x advertises
+`listChanged` to 2026-07-28 clients, and each one that subscribes holds an SSE
+stream open.
 
 ## Client attribution in logs
 
-`stateless_http=True` means the `initialize` params are not carried across
-requests, so `client_name` and `client_version` are `null` on `mcp.tool.start`
-events. Tool events therefore also log `user_agent`, taken from the HTTP header,
-which does survive. Group tool usage by `user_agent`; the [popularity example below](#popularity-reporting-example)
+`stateless_http=True` means a 2025-protocol client's `initialize` params are
+not carried across requests, so `client_name` and `client_version` are `null`
+on its `mcp.tool.start` events. 2026-07-28 clients repeat their client info in
+every request's `_meta`, so their tool events do carry it. Tool events also log
+`user_agent`, taken from the HTTP header, which is always present. Group tool
+usage by `user_agent`; the [popularity example below](#popularity-reporting-example)
 does this already.
 
 The client's own name and version are logged once per session instead, on the
@@ -179,17 +198,31 @@ The raw `mcp-http.log` still records full request headers either way.
 
 ## Dependency pinning
 
-`mcp` is constrained to `>=1.30.0,<2`, with the production dependency graph
-pinned by version and hash in `requirements.lock`. mcp 2.x renamed `FastMCP` to `MCPServer` and this
-server does not import under it - a rebuild that picked up 2.x would produce a
-container that crashes on startup. `httpx` is declared explicitly because mcp 2.x
-switched to `httpx2`, so it can no longer be relied on transitively.
+`mcp` is constrained to `>=2.3.0,<3`, with the production dependency graph
+pinned by version and hash in `requirements.lock`. The server moved from 1.30.0
+to 2.3.0 in October 2026 to serve the 2026-07-28 protocol. That port had three
+traps that do not show up as import errors:
+
+- 2.x shows the client only the text of `ToolError`/`ResourceError`; any other
+  exception becomes a bare "Error executing tool". The logging wrapper converts
+  `ValueError`/`RuntimeError` (argument checks and ScanMalware API errors), so
+  the model still sees why a call failed.
+- `host`, `port` and `stateless_http` moved from the constructor to `run()` and
+  the app factories (see [Transport mode](#transport-mode-stateless)).
+- Pydantic models use snake_case attributes (`client_info`, not `clientInfo`);
+  the wire format is unchanged.
+
+The 1.30 → 2.3 change left `tools/list` byte-identical for all 128 tools, along
+with resources, templates and prompts. `serverInfo.version` now reports the
+package version rather than the SDK's. `httpx` is declared explicitly because
+mcp 2.x uses `httpx2` internally, so it cannot be relied on transitively.
+Dependabot still ignores major `mcp` updates: 3.x will need its own port.
 
 ## Security maintenance
 
 The 2026-10-02 maintenance release uses Docker Engine 29.8.2 from Docker's
 signed Debian repository, Compose 5.5.1, containerd 2.3.6, runc 1.5.1,
-Python 3.14.8, MCP 1.30.0, Nginx 1.30.5 and mitmproxy 12.2.3.
+Python 3.14.8, MCP 1.30.0 (2.3.0 since the October 2026 migration), Nginx 1.30.5 and mitmproxy 12.2.3.
 Host Debian security updates remain automatic. Container image
 contents require a separate rebuild and deployment; restarting does not patch them.
 
@@ -217,7 +250,7 @@ is active on `main`. It rebuilds images and runs dependency checks and tests on
 pushes to `main`, pull requests, manual runs and the first of each month at
 05:17 UTC. [Dependabot](../.github/dependabot.yml) checks base images and Python
 dependencies weekly, and GitHub Actions monthly. Automated updates stay on
-the tested Python 3.14, Nginx 1.30 and MCP 1.x release lines; release-line
+the tested Python 3.14, Nginx 1.30 and MCP 2.x release lines; release-line
 migrations need a separate compatibility review. These checks do not deploy
 to production.
 
@@ -273,9 +306,10 @@ Process and session lifecycle events:
   streamable HTTP transport: `initialize`, or `server/discover` from clients
   that speak protocol 2026-07-28 (Claude.ai, recent Claude Code). It carries
   `method`, `protocol_version`, `client_name`, `client_version`, `user_agent`
-  and the client IP fields. A 2026-07-28 client that falls back logs a
-  `server/discover` followed by an `initialize`, so count `initialize` for
-  sessions.
+  and the client IP fields. Sessions are the `initialize` events (2025
+  protocol clients) plus the `server/discover` events (2026-07-28 clients).
+  Discovery is optional in 2026-07-28, so treat the second number as a lower
+  bound.
 - `mcp.lifespan.enter` (DEBUG, not written at the default INFO level) fires
   for every HTTP request, because the SDK runs the lifespan per request under
   `stateless_http`.
@@ -283,7 +317,7 @@ Process and session lifecycle events:
 Count sessions, and the clients behind them, for one log file:
 
 ```bash
-grep '"mcp.session.start"' /opt/scanmalware-mcp/logs/mcp/mcp.log | grep -c '"method": "initialize"'
+grep '"mcp.session.start"' /opt/scanmalware-mcp/logs/mcp/mcp.log | grep -o '"method": "[^"]*"' | sort | uniq -c
 grep '"mcp.session.start"' /opt/scanmalware-mcp/logs/mcp/mcp.log \
   | grep -o '"client_name": "[^"]*"' | sort | uniq -c | sort -rn | head -20
 ```

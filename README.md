@@ -183,7 +183,7 @@ curl -I https://mcp.scanmalware.com/
 curl -sS -o /dev/null -w '%{http_code}\n' https://mcp.scanmalware.com/mcp
 ```
 
-`/` should return 200 from Nginx. `/mcp` returns 406 on GET without MCP Accept headers, which is expected.
+`/` should return 200 from Nginx. `/mcp` returns 405 on GET, which is expected: the server offers no standalone SSE stream, so MCP requests use POST.
 
 ### Smoke test (MCP initialize + tools/list)
 
