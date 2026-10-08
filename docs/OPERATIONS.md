@@ -567,7 +567,9 @@ Install once (check `free -m` first; the droplet has 2 GB and no swap):
 
 ```bash
 mcpssh "bash /opt/scanmalware-mcp/deploy/audit/install.sh"
-mcpssh "ausearch -i -k scanmalware_mcp_exec --start today"
+# --input-logs: without a terminal (ssh with a command, cron, timers) ausearch
+# reads records from stdin instead of the audit log and waits or finds nothing.
+mcpssh "ausearch --input-logs -i -k scanmalware_mcp_exec --uid 10001 --start today"
 ```
 
 ### Container hardening

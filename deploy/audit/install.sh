@@ -12,4 +12,4 @@ fi
 install -m 0640 "${SCRIPT_DIR}/scanmalware-mcp.rules" /etc/audit/rules.d/scanmalware-mcp.rules
 systemctl enable --now auditd
 augenrules --load
-auditctl -l | grep -E 'scanmalware|ssh_|docker_config'
+auditctl -l | grep -E "scanmalware|ssh|docker_config"

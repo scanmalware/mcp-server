@@ -73,7 +73,11 @@ def read_lines(path: str) -> Iterator[str]:
 
 def run(cmd: list[str]) -> str:
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=120, check=False).stdout
+        # No stdin: ausearch reads records from stdin whenever it is not a
+        # terminal, which under a timer meant searching nothing.
+        return subprocess.run(
+            cmd, capture_output=True, text=True, timeout=120, check=False, stdin=subprocess.DEVNULL
+        ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return ""
 
@@ -183,13 +187,66 @@ def check_kernel(report: Report, since: float) -> None:
         )
 
 
+def _audit_value(record: str, field: str) -> str | None:
+    """A field of a raw audit record: quoted text, or hex for values with spaces or NULs."""
+    m = re.search(rf"\b{field}=(\"[^\"]*\"|[0-9A-F]+)(?:\s|$)", record)
+    if not m:
+        return None
+    value = m.group(1)
+    if value.startswith('"'):
+        return value.strip('"')
+    try:
+        return bytes.fromhex(value).replace(b"\0", b" ").decode("utf-8", "replace").strip()
+    except ValueError:
+        return value
+
+
+def audit_events(since: float, *selector: str) -> list[list[str]]:
+    """Raw records of each matching audit event since `since`, grouped by event.
+
+    selector is an ausearch filter, e.g. ("-k", key) or ("-m", "CONFIG_CHANGE").
+
+    --input-logs: without a terminal ausearch reads records from stdin, not the
+    audit log. Raw output and filtering here, rather than --start: ausearch parses
+    --start dates in the locale, which differs between a timer and a shell, while
+    raw timestamps are epoch seconds. The audit log is a few tens of MB at most.
+    """
+    out = run(["ausearch", "--input-logs", "--raw", *selector])
+    events: dict[str, list[str]] = {}
+    for line in out.splitlines():
+        m = re.search(r"msg=audit\((\d+\.\d+):(\d+)\)", line)
+        if m and float(m.group(1)) >= since:
+            events.setdefault(m.group(2), []).append(line)
+    return list(events.values())
+
+
 def check_audit(report: Report, since: float) -> None:
     if not run(["sh", "-c", "command -v ausearch"]).strip():
         report.add("INFO", "auditd is not installed; program starts and config changes are not audited")
         return
-    start = dt.datetime.fromtimestamp(since).strftime("%m/%d/%Y %H:%M:%S").split(" ")
-    execs = run(["ausearch", "-i", "-k", "scanmalware_mcp_exec", "--start", start[0], start[1]])
-    titles = Counter(m.group(1) for m in re.finditer(r"proctitle=(.*)", execs))
+    # Loading rules (at boot, or by hand) logs a CONFIG_CHANGE event per rule,
+    # tagged with the rule's key and naming the watched path: not a change to it.
+    # Removing rules or switching auditing off is how to go unseen, though.
+    loads = tampering = 0
+    for records in audit_events(since, "-m", "CONFIG_CHANGE"):
+        change = next((r for r in records if r.startswith("type=CONFIG_CHANGE")), "")
+        if "op=remove_rule" in change or re.search(r"\baudit_enabled=0\b", change):
+            tampering += 1
+        elif "op=add_rule" in change:
+            loads += 1
+    if tampering:
+        report.add("HIGH", f"audit rules removed or auditing switched off {tampering} time(s): check auditctl -l and -s")
+    if loads:
+        report.add("INFO", f"{loads} audit rule(s) loaded (boot, install or reload)")
+
+    titles = Counter()
+    for records in audit_events(since, "-k", "scanmalware_mcp_exec"):
+        syscall = next((r for r in records if r.startswith("type=SYSCALL")), "")
+        # The key also tags the CONFIG_CHANGE records written when rules load.
+        if not re.search(r"\buid=10001\b", syscall):
+            continue
+        proctitle = next((r for r in records if r.startswith("type=PROCTITLE")), "")
+        titles[_audit_value(proctitle, "proctitle") or _audit_value(syscall, "exe") or "?"] += 1
     expected = sum(count for title, count in titles.items() if ENTRYPOINT in title)
     unexpected = Counter({title: count for title, count in titles.items() if ENTRYPOINT not in title})
     if unexpected:
@@ -203,8 +260,15 @@ def check_audit(report: Report, since: float) -> None:
         ("sshd_config", "SSH server config"),
         ("docker_config", "Docker config"),
     ):
-        out = run(["ausearch", "-i", "-k", key, "--start", start[0], start[1]])
-        names = Counter(m.group(1) for m in re.finditer(r"type=PATH .*?name=(\S+) .*?nametype=(?:CREATE|NORMAL|DELETE)", out))
+        names = Counter()
+        for records in audit_events(since, "-k", key):
+            if any(r.startswith("type=CONFIG_CHANGE") for r in records):
+                continue  # a rule being loaded, not the path changing
+            for record in records:
+                if record.startswith("type=PATH") and re.search(r"nametype=(CREATE|NORMAL|DELETE)", record):
+                    name = _audit_value(record, "name")
+                    if name:
+                        names[name] += 1
         if names:
             severity = "HIGH" if key in ("ssh_authorized_keys", "sshd_config") else "INFO"
             report.add(severity, f"changes to {label}: {dict(names.most_common(8))}")
