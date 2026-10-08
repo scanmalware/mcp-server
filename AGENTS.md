@@ -70,7 +70,7 @@ Keep the exposed tool surface area curated (the API is large):
 Suggested initial tool set (public-only MVP):
 
 - `submit_scan(url, scan_type, options=None, user_agent=None)` (`scan_type` is required: a defaulted `"public"` published targets nobody chose to publish)
-- `wait_for_scan_result(scan_id, timeout_s=..., poll_interval_s=...)`
+- `wait_for_scan(scan_id, timeout_s=..., poll_interval_s=...)`
 - `get_scan_summary(scan_id)`
 - `get_scan_result(scan_id)`
 - `get_recent_scans(page=1, limit=20)`
