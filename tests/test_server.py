@@ -334,6 +334,16 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
                     with self.subTest(tool=name, mentions=other):
                         self.assertNotRegex(description, rf"\b{other}\b")
 
+    async def test_titles_use_plain_words(self) -> None:
+        # OpenAI's directory scan flagged "Get Netlog" and the "JS Fingerprinter2"
+        # titles as names that do not communicate their purpose. Titles are what
+        # users see, so internal service names stay out of them.
+        tools = await self.tools()
+        for name, tool in tools.items():
+            title = tool.get("title") or ""
+            with self.subTest(tool=name, title=title):
+                self.assertNotRegex(title, r"(?i)netlog|fingerprinter")
+
 
 if __name__ == "__main__":
     unittest.main()
