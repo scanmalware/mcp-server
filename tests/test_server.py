@@ -494,6 +494,48 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
 
 
 class ServerInternalsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_mcp_auth_token_is_enforced(self) -> None:
+        # Setting MCP_AUTH_TOKEN used to crash create_server: the mcp.auth log
+        # line passed pydantic URL objects to json.dumps. _log_event is left
+        # unpatched here so that line really runs.
+        upstream = httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200, json={})),
+            base_url="https://scanmalware.com",
+        )
+        self.addAsyncCleanup(upstream.aclose)
+        initialize = {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "auth", "version": "1"}},
+        }
+        accept = {"accept": "application/json, text/event-stream"}
+        with ExitStack() as stack:
+            stack.enter_context(patch.object(module, "_configure_logging"))
+            stack.enter_context(patch.dict("os.environ", {"MCP_AUTH_TOKEN": "s3cret-token"}, clear=True))
+            stack.enter_context(
+                patch.object(module, "_get_shared_client", new=AsyncMock(return_value=(upstream, "https://scanmalware.com")))
+            )
+            previous_log_level = logging.root.manager.disable
+            logging.disable(logging.CRITICAL)
+            self.addCleanup(logging.disable, previous_log_level)
+            server = module.create_server(host="0.0.0.0", port=8000)
+            app = server.streamable_http_app()
+            async with server.session_manager.run():
+                async with httpx.AsyncClient(
+                    transport=httpx.ASGITransport(app=app), base_url="http://localhost:8000"
+                ) as client:
+                    missing = await client.post("/mcp", headers=accept, json=initialize)
+                    wrong = await client.post(
+                        "/mcp", headers={**accept, "authorization": "Bearer wrong"}, json=initialize
+                    )
+                    right = await client.post(
+                        "/mcp", headers={**accept, "authorization": "Bearer s3cret-token"}, json=initialize
+                    )
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(wrong.status_code, 401)
+        self.assertEqual(right.status_code, 200, right.text)
+
     async def test_production_host_header_is_accepted(self) -> None:
         # Production binds 0.0.0.0 behind nginx, which forwards
         # Host: mcp.scanmalware.com. The SDK switches on DNS-rebinding protection
