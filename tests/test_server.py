@@ -414,7 +414,7 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
                     return httpx.Response(200, json=body)
 
                 self.route = route
-                result = await self.call("wait_for_scan", scan_id=self.SCAN_ID, poll_interval_s=0.01)
+                result = await self.call("wait_for_scan_result", scan_id=self.SCAN_ID, poll_interval_s=0.01)
                 self.assertFalse(result.get("isError"), result)
                 summary = result["structuredContent"]
                 self.assertEqual(summary["status"], statuses[-1])
