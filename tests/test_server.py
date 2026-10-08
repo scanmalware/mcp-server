@@ -391,6 +391,37 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(tool=name, title=title):
                 self.assertNotRegex(title, r"(?i)netlog|fingerprinter")
 
+    async def test_wait_for_scan_marks_a_pending_verdict(self) -> None:
+        # The verdict follows "completed" by 19-73 s and never comes for a failed
+        # scan. An unmarked empty verdict was reported by ChatGPT as a verdict
+        # based on risk score 0.
+        verdict = {"verdict": "Low Risk", "risk_level": "low", "confidence": 77}
+        for statuses, final_verdict, pending in (
+            (["processing", "completed"], {}, True),
+            (["queued", "completed"], verdict, False),
+            (["processing", "failed"], {}, False),
+        ):
+            with self.subTest(statuses=statuses, verdict=bool(final_verdict)):
+                replies = iter(statuses)
+                before = len(self.requests)
+
+                def route(request: httpx.Request, replies=replies, final_verdict=final_verdict):
+                    status = next(replies)
+                    body = {"scan_id": self.SCAN_ID, "status": status, "risk_score": 0}
+                    body["security_verdict"] = final_verdict if status != "processing" else {}
+                    return httpx.Response(200, json=body)
+
+                self.route = route
+                result = await self.call("wait_for_scan", scan_id=self.SCAN_ID, poll_interval_s=0.01)
+                self.assertFalse(result.get("isError"), result)
+                summary = result["structuredContent"]
+                self.assertEqual(summary["status"], statuses[-1])
+                self.assertIs(summary["verdict_pending"], pending)
+                self.assertEqual("verdict_note" in summary, pending)
+                self.assertEqual(summary["security_verdict"], final_verdict)
+                # Returns on the first terminal status: no extra polling for the verdict.
+                self.assertEqual(len(self.requests) - before, len(statuses))
+
     async def test_free_text_path_values_stay_in_their_segment(self) -> None:
         # Raw interpolation let httpx resolve "..": this domain reached
         # /api/v1/domain/platform/stats in production on 2026-10-02.
