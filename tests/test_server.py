@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import logging
 import unittest
 from contextlib import ExitStack
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import httpx
@@ -124,6 +126,8 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             ("get_jsfingerprint_similarity_counts", {"fingerprint_id": 10448358}, 90),
             # 57 s for a cold query, 0.2 s once cached.
             ("search_js_fingerprinter2_signature", {"signature": "fetch:4|complex"}, 90),
+            # 18 s median, 27 s max and three 30 s timeouts in the week to 2026-10-08.
+            ("get_technology_stats", {}, 90),
             ("get_recent_scans", {}, 30),
         ):
             with self.subTest(tool=name):
@@ -170,11 +174,54 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result.get("isError"), result)
             self.assertEqual(self.requests[-1].url.path, f"/api/v1/jsfingerprint/library/{name}")
 
-    async def test_filterless_searches_are_rejected_before_upstream(self) -> None:
-        for name in ("search_js_obfuscation", "search_js_malware_families", "search_js_fingerprint_patterns"):
-            result = await self.call(name, limit=5)
-            self.assertTrue(result.get("isError"), result)
+    async def test_filterless_searches_succeed(self) -> None:
+        # Directory crawlers call every tool with its defaults; these three failed
+        # that call. Two endpoints accept no filter; the pattern search needs one,
+        # so it applies has_eval=true.
+        for name, expected in (
+            ("search_js_obfuscation", {"limit": "5"}),
+            ("search_js_malware_families", {"limit": "5"}),
+            ("search_js_fingerprint_patterns", {"has_eval": "true", "limit": "5"}),
+        ):
+            with self.subTest(tool=name):
+                result = await self.call(name, limit=5)
+                self.assertFalse(result.get("isError"), result)
+                self.assertEqual(dict(self.requests[-1].url.params), expected)
+
+    async def test_pattern_search_does_not_offer_the_unsupported_websocket_filter(self) -> None:
+        # The API answers 400 to has_websocket: no websocket feature is extracted.
+        schema = (await self.tools())["search_js_fingerprint_patterns"]["inputSchema"]
+        self.assertNotIn("has_websocket", schema["properties"])
+        result = await self.call("search_js_fingerprint_patterns", has_crypto=True)
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(dict(self.requests[-1].url.params), {"has_crypto": "true", "limit": "20"})
+
+    async def test_score_filters_use_the_api_ranges(self) -> None:
+        # Agents sent percentages (70, 80) where the API takes 0-10 or 0-1 and
+        # answers 422. Out-of-range values are rejected before the request.
+        for name, args in (
+            ("search_ai_high_risk", {"min_risk_score": 11}),
+            ("search_ai_high_risk", {"min_risk_score": -1}),
+            ("search_ai_high_risk", {"min_confidence": 101}),
+            ("search_js_fingerprint_obfuscated", {"min_score": 40.0}),
+            ("search_js_fingerprint_obfuscated", {"max_score": 1.5}),
+            ("search_js_obfuscation", {"min_risk_score": 101}),
+        ):
+            with self.subTest(tool=name, args=args):
+                result = await self.call(name, **args)
+                self.assertTrue(result.get("isError"), result)
         self.assertEqual(self.requests, [])
+        for name, args in (
+            ("search_ai_high_risk", {"min_risk_score": 10, "min_confidence": 100}),
+            ("search_ai_high_risk", {"min_risk_score": 0, "min_confidence": 0}),
+            ("search_js_fingerprint_obfuscated", {"min_score": 0.4, "max_score": 1.0}),
+            ("search_js_obfuscation", {"min_risk_score": 100}),
+        ):
+            with self.subTest(tool=name, args=args):
+                result = await self.call(name, **args)
+                self.assertFalse(result.get("isError"), result)
+                for key, value in args.items():
+                    self.assertEqual(self.requests[-1].url.params[key], str(value))
 
     async def test_explicit_false_and_zero_filters_are_forwarded(self) -> None:
         for name, args in (
@@ -343,6 +390,145 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             title = tool.get("title") or ""
             with self.subTest(tool=name, title=title):
                 self.assertNotRegex(title, r"(?i)netlog|fingerprinter")
+
+    async def test_free_text_path_values_stay_in_their_segment(self) -> None:
+        # Raw interpolation let httpx resolve "..": this domain reached
+        # /api/v1/domain/platform/stats in production on 2026-10-02.
+        for name, args, raw_path in (
+            (
+                "get_domain_stats",
+                {"domain": "example.com/../../platform/stats"},
+                b"/api/v1/domain/stats/example.com%2F..%2F..%2Fplatform%2Fstats",
+            ),
+            (
+                "search_by_registrar",
+                {"registrar_name": "GoDaddy.com, LLC"},
+                b"/api/v1/registrar/search/GoDaddy.com%2C%20LLC",
+            ),
+            ("search_cpe", {"cpe_pattern": "cpe:2.3:a:jquery:jquery"}, b"/api/v1/cpe/search/cpe%3A2.3%3Aa%3Ajquery%3Ajquery"),
+            (
+                "search_jsfingerprints_by_library_version",
+                {"library": "jquery/../..", "version": "3.7.1"},
+                b"/api/v1/jsfingerprints/search/library/jquery%2F..%2F../version/3.7.1",
+            ),
+            ("search_tracking_key", {"tracker_type": "google_analytics", "key": "UA-1?x#y"}, b"/api/v1/tracking-keys/google_analytics/UA-1%3Fx%23y"),
+        ):
+            with self.subTest(tool=name):
+                result = await self.call(name, **args)
+                self.assertFalse(result.get("isError"), result)
+                self.assertEqual(self.requests[-1].url.raw_path.split(b"?")[0], raw_path)
+        sent = len(self.requests)
+        for value in ("..", ".", "  "):
+            with self.subTest(domain=value):
+                result = await self.call("get_domain_stats", domain=value)
+                self.assertTrue(result.get("isError"), result)
+        self.assertEqual(len(self.requests), sent)
+
+    async def raw_post(self, payload: dict, accept: str | None) -> httpx.Response:
+        request = self.client.build_request("POST", "/mcp", json=payload)
+        if accept is None:
+            del request.headers["accept"]
+        else:
+            request.headers["accept"] = accept
+        return await self.client.send(request)
+
+    async def test_wildcard_accept_headers_are_served(self) -> None:
+        # The SDK wants both literal types; these accept both but got 406.
+        listing = {"jsonrpc": "2.0", "id": 99, "method": "tools/list"}
+        for accept in ("*/*", None, "application/*, text/*", "*/*;q=0.8"):
+            with self.subTest(accept=accept):
+                response = await self.raw_post(listing, accept)
+                self.assertEqual(response.status_code, 200, response.text)
+        # Headers that exclude one of the types are still refused.
+        for accept in ("application/json", "text/event-stream", "text/html", "*/*;q=0"):
+            with self.subTest(accept=accept):
+                response = await self.raw_post(listing, accept)
+                self.assertEqual(response.status_code, 406, response.text)
+        # GET is not widened: an accepted GET opens a standing SSE stream.
+        response = await self.client.get("/mcp", headers={"accept": "*/*"})
+        self.assertEqual(response.status_code, 406)
+
+    def logged(self, event: str) -> list[dict]:
+        return [call.kwargs for call in module._log_event.call_args_list if call.args[1] == event]
+
+    async def test_sessions_are_counted_once_per_handshake(self) -> None:
+        # asyncSetUp's initialize is the only handshake so far.
+        starts = self.logged("mcp.session.start")
+        self.assertEqual(len(starts), 1)
+        self.assertEqual(starts[0]["method"], "initialize")
+        self.assertEqual(starts[0]["client_name"], "regression-tests")
+        self.assertEqual(starts[0]["client_version"], "1.0")
+        self.assertEqual(starts[0]["protocol_version"], "2025-06-18")
+        await self.rpc("tools/list", {})
+        await self.call("get_recent_scans")
+        self.assertEqual(len(self.logged("mcp.session.start")), 1)
+        # The per-request lifespan no longer logs a "session" at INFO.
+        self.assertEqual(self.logged("mcp.session.open"), [])
+        # 2026-07-28 clients open with server/discover and carry clientInfo in _meta.
+        await self.raw_post(
+            {
+                "jsonrpc": "2.0",
+                "id": 7,
+                "method": "server/discover",
+                "params": {
+                    "_meta": {
+                        "io.modelcontextprotocol/protocolVersion": "2026-07-28",
+                        "io.modelcontextprotocol/clientInfo": {"name": "Anthropic/ClaudeAI", "version": "1.0"},
+                    }
+                },
+            },
+            "application/json, text/event-stream",
+        )
+        discover = self.logged("mcp.session.start")[-1]
+        self.assertEqual(
+            (discover["method"], discover["client_name"], discover["protocol_version"]),
+            ("server/discover", "Anthropic/ClaudeAI", "2026-07-28"),
+        )
+
+
+class ServerInternalsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_cancelled_tool_calls_are_logged(self) -> None:
+        # A client that disconnects mid-call cancels the tool. CancelledError is a
+        # BaseException, so it used to leave a start event and nothing else.
+        started = asyncio.Event()
+
+        async def slow_tool() -> dict:
+            started.set()
+            await asyncio.sleep(3600)
+            return {}
+
+        wrapped = module._wrap_with_logging(slow_tool, name="slow_tool", kind="tool")
+        with patch.object(module, "_log_event") as log_event:
+            task = asyncio.create_task(wrapped())
+            await started.wait()
+            task.cancel()
+            with self.assertRaises(asyncio.CancelledError):
+                await task
+        events = [call.args[1] for call in log_event.call_args_list]
+        self.assertEqual(events, ["mcp.tool.start", "mcp.tool.cancelled"])
+        self.assertEqual(log_event.call_args_list[-1].kwargs["tool"], "slow_tool")
+
+    def test_every_api_path_value_is_validated_or_encoded(self) -> None:
+        # Guards new tools against interpolating free text into an API path.
+        # These names are UUID-checked, ipaddress-normalised, ints or Literals.
+        safe_names = {"scan_id", "ip_address", "asn_number", "hash_type", "mmh3_hash", "fingerprint_id"}
+        tree = ast.parse(Path(module.__file__).read_text())
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.JoinedStr):
+                continue
+            literal = "".join(part.value for part in node.values if isinstance(part, ast.Constant))
+            if not literal.startswith("/api/v1/"):
+                continue
+            for part in node.values:
+                if not isinstance(part, ast.FormattedValue):
+                    continue
+                value = part.value
+                with self.subTest(line=node.lineno, value=ast.unparse(value)):
+                    if isinstance(value, ast.Name):
+                        self.assertIn(value.id, safe_names)
+                    else:
+                        self.assertIsInstance(value, ast.Call)
+                        self.assertEqual(ast.unparse(value.func), "_path_segment")
 
 
 if __name__ == "__main__":

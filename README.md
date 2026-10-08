@@ -43,7 +43,7 @@ Other env vars:
 - `SCANMALWARE_BASE_URL` (default: `https://scanmalware.com`)
 - `SCANMALWARE_ALLOW_HTTP` (default: `false`)
 - `SCANMALWARE_TIMEOUT_S` (default: `30`)
-- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default: `90`; favicon statistics and OCR text search only)
+- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default: `90`; favicon and technology statistics, OCR text search, JS fingerprint similarity counts and behavioural signature search)
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default: `10485760`)
 - `SCANMALWARE_ALLOW_PRIVATE_TARGETS` (default: `false`)
 - `SCANMALWARE_CA_CERT` (optional; path to a CA bundle for SSL bump)
