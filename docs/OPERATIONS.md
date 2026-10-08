@@ -417,7 +417,7 @@ because measured latency exceeded or approached the normal 30-second timeout:
 | `get_favicon_stats` | 57 s live aggregation |
 | `search_ocr` | 24–30 s for successful searches |
 | `get_jsfingerprint_similarity_counts` | ~31 s per call (2026-10-07) |
-| `search_js_fingerprinter2_signature` | 57–65 s cold, 0.2 s once cached |
+| `search_js_runtime_by_signature` | 57–65 s cold, 0.2 s once cached |
 | `get_technology_stats` | 18 s median, 27 s max, three 30 s timeouts (week to 2026-10-08) |
 
 Other tools continue using `SCANMALWARE_TIMEOUT_S`. A client with a shorter

@@ -125,7 +125,7 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             # ~31 s per call, measured 2026-10-07; the 30 s default timed out every time.
             ("get_jsfingerprint_similarity_counts", {"fingerprint_id": 10448358}, 90),
             # 57 s for a cold query, 0.2 s once cached.
-            ("search_js_fingerprinter2_signature", {"signature": "fetch:4|complex"}, 90),
+            ("search_js_runtime_by_signature", {"signature": "fetch:4|complex"}, 90),
             # 18 s median, 27 s max and three 30 s timeouts in the week to 2026-10-08.
             ("get_technology_stats", {}, 90),
             ("get_recent_scans", {}, 30),
@@ -305,7 +305,7 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["structuredContent"]["size_bytes"], len(png))
 
     async def test_signature_is_sent_as_one_encoded_path_segment(self) -> None:
-        result = await self.call("search_js_fingerprinter2_signature", signature="setTimeout:30|fetch:4/x?y#z")
+        result = await self.call("search_js_runtime_by_signature", signature="setTimeout:30|fetch:4/x?y#z")
         self.assertFalse(result.get("isError"), result)
         request = self.requests[-1]
         self.assertTrue(
@@ -315,7 +315,7 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             request.url.raw_path,
         )
         self.assertEqual(dict(request.url.params), {"limit": "20"})
-        result = await self.call("search_js_fingerprinter2_signature", signature="   ")
+        result = await self.call("search_js_runtime_by_signature", signature="   ")
         self.assertTrue(result.get("isError"), result)
         self.assertEqual(len(self.requests), 1)
 
@@ -383,13 +383,15 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_titles_use_plain_words(self) -> None:
         # OpenAI's directory scan flagged "Get Netlog" and the "JS Fingerprinter2"
-        # titles as names that do not communicate their purpose. Titles are what
-        # users see, so internal service names stay out of them.
+        # titles as names that do not communicate their purpose, and a later scan
+        # flagged the *_js_fingerprinter2* tool names themselves. Titles and names
+        # are what users and reviewers see, so internal service names stay out.
         tools = await self.tools()
         for name, tool in tools.items():
             title = tool.get("title") or ""
             with self.subTest(tool=name, title=title):
                 self.assertNotRegex(title, r"(?i)netlog|fingerprinter")
+                self.assertNotRegex(name, r"fingerprinter")
 
     async def test_wait_for_scan_marks_a_pending_verdict(self) -> None:
         # The verdict follows "completed" by 19-73 s and never comes for a failed
