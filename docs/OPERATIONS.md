@@ -294,7 +294,7 @@ cryptography, HPACK and ASN.1 updates were applied.
 
 Two files are persisted on the host and survive redeploys:
 
-- Sanitized log: `/opt/scanmalware-mcp/logs/mcp/mcp.log` (about three months in Compose)
+- Sanitized log: `/opt/scanmalware-mcp/logs/mcp/mcp.log` (about ten months in Compose)
   - Includes session starts (client name/version, protocol version), tool/resource
     start/end/error/cancelled, args (sanitized), timing, user agent and IP fields.
   - Every event of a call carries its `call_id`. The end, error and cancelled
@@ -306,7 +306,7 @@ Two files are persisted on the host and survive redeploys:
     final URL, visibility, status, redirect count, risk. If the final URL or a
     redirect lands on a private, loopback or link-local address, an
     `mcp.scan.internal_target` WARNING follows. See [Security monitoring](#security-monitoring).
-- Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log` (about two weeks in Compose)
+- Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log` (about two and a half weeks in Compose)
   - Includes full tool args and full tool results (no redaction).
 
 Rotation: 10 MiB max per file; Compose keeps 30 backups of `mcp.log` and 48 of
@@ -358,8 +358,8 @@ a start event.
   - Includes raw MCP HTTP request/response headers and bodies (base64) with per-request IDs.
   - Bodies are captured up to `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES` (default `1048576`, set to `0` for unlimited).
 
-Rotation: 10 MiB max per file; 112 backups in Compose (about 1.1 GiB, two weeks
-at ~79 MB a day in October 2026), or 7 backups for the standalone server. Controlled by:
+Rotation: 10 MiB max per file; 112 backups in Compose (about 1.1 GiB, about ten days
+at ~115 MB a day, measured 2026-10-17), or 7 backups for the standalone server. Controlled by:
 - `SCANMALWARE_MCP_HTTP_LOG_FILE`, `SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES`, `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT`
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES`
 
@@ -414,13 +414,14 @@ and closes its file for each event and recreates it on the next write. Neither
 uses `copytruncate`. See [Nginx log rotation](https://nginx.org/en/docs/control.html).
 
 MCP application, full-result, and raw HTTP logs continue using Python rotation,
-10 MiB per file. The Compose deployment keeps, at October 2026 rates:
+10 MiB per file. The Compose deployment keeps, at the volume measured on 2026-10-17
+(oldest entry per file set, read on the droplet):
 
 | Log | Backups | Size | Covers about |
 | --- | --- | --- | --- |
-| `mcp.log` | 30 | ~310 MiB | three months |
-| `mcp-full.log` | 48 | ~490 MiB | two weeks (was two days with 7) |
-| `mcp-http.log` | 112 | ~1.1 GiB | two weeks (was one with 63) |
+| `mcp.log` | 30 | ~310 MiB | ten months (~10 days per file; logging began 2026-06-13, so it is not full yet) |
+| `mcp-full.log` | 48 | ~490 MiB | two and a half weeks (was two days with 7) |
+| `mcp-http.log` | 112 | ~1.1 GiB | ten days (was one week with 63, at a lower volume) |
 
 Nginx and the proxy keep 14 daily archives (above). The standalone server keeps
 7 backups of each MCP log. Rotation limits are volume-based, so they do not
@@ -537,10 +538,10 @@ code execution inside the container invisible. What each layer now shows:
 
 | Question | Where to look |
 | --- | --- |
-| What did a client send, and did the call fail? | `mcp.log`: `mcp.tool.start` args, then end/error/cancelled (three months) |
+| What did a client send, and did the call fail? | `mcp.log`: `mcp.tool.start` args, then end/error/cancelled (about ten months) |
 | Which API paths did that call reach? | `upstream` on the end/error event; full exchanges in the proxy log via `X-MCP-Call-ID` = `call_id` |
 | Did a scan end on an internal address? | `mcp.scan.internal_target` WARNING in `mcp.log` |
-| What did the client get back? | `mcp-full.log` and `mcp-http.log` (two weeks) |
+| What did the client get back? | `mcp-full.log` (two and a half weeks) and `mcp-http.log` (ten days) |
 | Did code in the container try to reach anything else? | `proxy.blocked` in the proxy log; firewall drops in the kernel log |
 | Did anything run in the container, or change on the host? | auditd (below) |
 | Who logged in to the host? | `journalctl -u ssh` |
