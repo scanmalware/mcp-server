@@ -9,7 +9,7 @@ services:
   proxy:
     container_name: deploy_proxy_1
     logging: *bounded-logging
-    image: scanmalware-proxy:security-20261002
+    image: scanmalware-proxy:security-20261029
     build:
       context: ./mitmproxy
     volumes:
@@ -46,7 +46,7 @@ services:
 
   mcp:
     container_name: deploy_mcp_1
-    image: scanmalware-mcp:security-20261002
+    image: scanmalware-mcp:security-20261029
     logging: *bounded-logging
     build:
       context: ..
@@ -109,7 +109,7 @@ services:
   nginx:
     container_name: deploy_nginx_1
     logging: *bounded-logging
-    image: scanmalware-nginx:security-20261002
+    image: scanmalware-nginx:security-20261029
     build:
       context: ./nginx
     depends_on:
