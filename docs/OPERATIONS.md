@@ -225,10 +225,14 @@ Dependabot still ignores major `mcp` updates: 3.x will need its own port.
 
 ## Security maintenance
 
-The 2026-10-02 maintenance release uses Docker Engine 29.8.2 from Docker's
-signed Debian repository, Compose 5.5.1, containerd 2.3.6, runc 1.5.1,
-Python 3.14.8, MCP 1.30.0 (2.3.0 since the October 2026 migration), Nginx 1.30.5 and mitmproxy 12.2.3.
-Host Debian security updates remain automatic. Container image
+The 2026-10-29 maintenance release uses Docker Engine 29.9.2 from Docker's
+signed Debian repository, Compose 5.6.1, containerd 2.4.2, Debian kernel 6.1.0-54,
+Python 3.14.9, MCP 2.3.0, Nginx 1.30.6 and mitmproxy 12.3.1. It followed the
+Brotli decoder flaw (CVE-2026-111497) and the Nginx 1.30.6 security fixes; the
+2026-10-02 release before it ran Docker Engine 29.8.2, Python 3.14.8, Nginx 1.30.5
+and mitmproxy 12.2.3.
+Host Debian security updates remain automatic, but packages from Docker's
+repository and kernel reboots do not happen by themselves. Container image
 contents require a separate rebuild and deployment; restarting does not patch them.
 
 Python and Nginx base images are pinned by digest. Each build applies available
@@ -249,6 +253,11 @@ uv pip compile deploy/mitmproxy/requirements.in --python-version 3.14 \
 uv run --no-project --with pip-audit pip-audit --no-deps --disable-pip -r requirements.lock
 uv run --no-project --with pip-audit pip-audit --no-deps --disable-pip -r deploy/mitmproxy/requirements.lock
 ```
+
+For a security-only release, `--upgrade-package <name>` in place of `--upgrade`
+limits the MCP lock to the affected packages (2026-10-29: certifi, setuptools,
+pip). A full refresh can move Pydantic, which generates the published tool
+schemas, and the directory reviews rescan any change to tools/list.
 
 The [GitHub security-maintenance workflow](../.github/workflows/security-maintenance.yml)
 is active on `main`. It rebuilds images and runs dependency checks and tests on
@@ -272,21 +281,26 @@ The MCP Python dependency lock has no known findings in the maintenance audit.
 This is not a claim that all container OS packages are vulnerability-free:
 Debian still lists findings without a released distribution fix.
 
-mitmproxy 12.2.3 caps four libraries below available security fixes:
+mitmproxy 12.3.1 caps one library below available security fixes:
 
 | Library | Locked version | Remaining scope / action |
 | --- | --- | --- |
-| cryptography | 48.0.1 | Certificate-verifier and PKCS7 advisories; follow the upstream compatibility update. |
-| h2 | 4.3.0 | HTTP/2 is disabled in this deployment. |
-| msgpack | 1.1.2 | Unpacker error handling; no untrusted flow archives are loaded by the service. |
-| tornado | 6.5.5 | HTTP/websocket/UI advisories; mitmweb and Tornado server/client features are not enabled here. |
+| tornado | 6.5.10 | Header line folding, chunked-body and RedirectHandler advisories, fixed in 6.6; mitmdump runs no Tornado server or client, and mitmweb is not enabled here. |
 
 These remain open package findings. The audit step reports each match and uses
 `deploy/mitmproxy/audit-baseline.json` to fail on new advisories, changed package
-versions, or an overdue review (2026-11-02). Do not override upstream dependency bounds just to make the
+versions, or an overdue review (2026-12-01). Do not override upstream dependency bounds just to make the
 audit green; test a compatible upstream release when one becomes available.
-The proxy was rebuilt on current Python/OS packages and its compatible
-cryptography, HPACK and ASN.1 updates were applied.
+mitmproxy 12.3.1 lifted the earlier caps on cryptography (now 50.0.2), h2 (4.4.1)
+and Brotli (1.2.1), and no longer depends on msgpack.
+
+CVE-2026-111497 (Brotli decoder, October 2026) is fixed in every copy on the
+droplet: the host's `libbrotli1` carries Debian's fix (`1.0.9-2+deb12u1`,
+installed automatically on 2026-10-23), the proxy runs Brotli 1.2.1, and the
+Nginx image's `brotli-libs` (used by freetype and curl, not by Nginx) is
+`1.2.1-r0`. The MCP image has no Brotli decoder, and httpx there only offers
+gzip and deflate. Before the fix, the proxy's exposure was already small: it
+logs raw bodies without decoding them, and scanmalware.com sent no Brotli.
 
 ## Logs (persistent)
 
@@ -801,13 +815,13 @@ REV=<short commit id>
 B="/root/deploy-backup-$(date +%F)-pre-$REV"
 mkdir -p "$B"
 tar -cf "$B/files.tar" scanmalware_mcp pyproject.toml requirements.lock deploy/nginx/nginx.conf
-# Compose runs the image tagged security-20261002; keep the current one for rollback.
-docker tag scanmalware-mcp:security-20261002 "scanmalware-mcp:rollback-pre-$REV"
+# Compose runs the image tagged security-20261029; keep the current one for rollback.
+docker tag scanmalware-mcp:security-20261029 "scanmalware-mcp:rollback-pre-$REV"
 
 # Build from a staged copy, so the live tree is untouched until the image exists.
 rm -rf "/tmp/deploy-$REV" && mkdir "/tmp/deploy-$REV"
 tar -xzf /tmp/scanmalware-mcp.tar.gz -C "/tmp/deploy-$REV"
-(cd "/tmp/deploy-$REV" && nice docker build -q -t scanmalware-mcp:security-20261002 .)
+(cd "/tmp/deploy-$REV" && nice docker build -q -t scanmalware-mcp:security-20261029 .)
 
 # cp writes into existing files, keeping nginx.conf's inode: it is a single-file
 # bind mount, and a replaced file would be invisible to the running container.
@@ -834,7 +848,7 @@ mcpssh <<'SH'
 set -euo pipefail
 cd /opt/scanmalware-mcp
 REV=<short commit id>
-docker tag "scanmalware-mcp:rollback-pre-$REV" scanmalware-mcp:security-20261002
+docker tag "scanmalware-mcp:rollback-pre-$REV" scanmalware-mcp:security-20261029
 inode=$(stat -c %i deploy/nginx/nginx.conf)
 # GNU tar on the droplet writes into existing files, keeping the inode.
 tar -xf "/root/deploy-backup-<date>-pre-$REV/files.tar"
