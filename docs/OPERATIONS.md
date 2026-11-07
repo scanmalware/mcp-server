@@ -11,7 +11,7 @@ This document describes the current DigitalOcean deployment, how to connect to t
 - Containers (Docker Compose plugin):
   - `mcp` (ScanMalware MCP server, streamable HTTP on port 8000)
   - `nginx` (frontend on 80/443, proxies `/mcp` to `mcp:8000`)
-  - `proxy` (mitmproxy with ScanMalware destination checks + full HTTP logging)
+  - `proxy` (mitmproxy with ScanMalware destination checks and bounded HTTP body logging)
 
 ## Connect to the DigitalOcean instance
 
@@ -272,6 +272,11 @@ the tested Python 3.14, Nginx 1.30 and MCP 2.x release lines; release-line
 migrations need a separate compatibility review. These checks do not deploy
 to production.
 
+CI validates the repository's actual nginx configuration with a disposable TLS
+certificate and a local `mcp` hostname mapping (`bash deploy/check_nginx.sh nginx-check`).
+It also runs a loopback-only proxy streaming fixture, response/deadline regression
+tests, and redeploy tests using a Docker stub. No test submits a live scan.
+
 Before a runtime upgrade or reboot, retain a droplet snapshot, the private
 configuration/CA backup and previous images. Build and test candidates first.
 After deployment, verify tools/list (128 tools), API requests, both proxy
@@ -411,6 +416,8 @@ a start event.
 
 - Raw HTTP log: `/opt/scanmalware-mcp/logs/mcp/mcp-http.log`
   - Includes raw MCP HTTP request/response headers and bodies (base64) with per-request IDs.
+  - Authorization, Proxy-Authorization, Cookie, Set-Cookie and X-API-Key header
+    values are redacted in both directions. URL/body contents can still be sensitive.
   - Bodies are captured up to `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES` (default `1048576`, set to `0` for unlimited).
 
 Rotation: 10 MiB max per file; 112 backups in Compose (about 1.1 GiB), or 7
@@ -433,9 +440,17 @@ The access log includes client IPs, the Host header and TLS details. Its
 
 ### mitmproxy logs
 
-- Full HTTP log: `/opt/scanmalware-mcp/logs/mitmproxy/full.log`
-  - JSON lines with full request/response headers and bodies (base64).
-  - Bodies may be compressed (see `content-encoding` header).
+- HTTP log: `/opt/scanmalware-mcp/logs/mitmproxy/full.log`
+  - JSON lines with request/response metadata and redacted sensitive headers.
+  - Buffered bodies include at most `MITMPROXY_LOG_MAX_BODY_BYTES` (default 64 KiB)
+    as base64, plus original `length`, `captured` and `truncated` fields. `0` omits
+    body bytes. Bodies may be compressed (see `content-encoding`).
+  - Responses above `MITMPROXY_STREAM_LARGE_BODIES` (default `1m`) are streamed
+    with `store_streamed_bodies=false`: the body is not retained or logged.
+    This lets metadata-only NetLog requests close after headers without first
+    buffering the whole file. The proxy also rejects bodies above
+    `MITMPROXY_BODY_SIZE_LIMIT` (default `64m`); raise that limit deliberately if
+    metadata is needed for larger artifacts. Application limits still apply.
   - Each upstream request carries the MCP call's `X-MCP-Call-ID` header, which
     matches `call_id` in `mcp.log`.
   - Every refused destination is a `proxy.blocked` line (method, host, port,
@@ -548,6 +563,22 @@ du -sh /var/log/scanmalware-mcp-archive/*
 zstdgrep '"proxy.blocked"' /var/log/scanmalware-mcp-archive/mitmproxy/2026/11/*.zst
 zstdcat /var/log/scanmalware-mcp-archive/mcp/2026/11/mcp.log.*.zst | grep '"mcp.scan.internal_target"'
 ```
+
+### Response and polling budgets
+
+Successful binary resources and JSON responses are read as streams with separate
+10 MiB decoded limits. Chunked or compressed responses count decoded bytes;
+`Content-Length` is not trusted as the only size check. Error bodies are sampled
+up to 16 KiB, marked when truncated, and keep the original HTTP status so retry
+and missing-artifact handling still work. Limits are configurable with the three
+`SCANMALWARE_MAX_*_BYTES` variables below; all must be positive.
+
+`wait_for_scan` applies a wall-clock deadline to requests, retries and sleeps.
+It accepts finite `timeout_s` in `(0, 3600]` and `poll_interval_s` in `[0.1, 60]`.
+Retryable errors back off up to 60 seconds and honor `Retry-After`; the overall
+deadline can interrupt that delay. On timeout the last successful summary is
+returned, or an empty summary and `status: "unknown"` if no poll succeeded.
+Ordinary API tools, including writes, are not automatically retried.
 
 ### Slow upstream queries
 
@@ -733,9 +764,13 @@ like code execution in the container would be.
 
 ## TLS inspection (mitmproxy)
 
-mitmproxy is configured to intercept TLS so it can log full request/response data.
+mitmproxy intercepts TLS for destination enforcement and bounded traffic logging.
 It generates a CA under `deploy/mitmproxy/state` and the MCP container trusts the
 CA via `SCANMALWARE_CA_CERT`.
+
+Compose waits for the proxy listener and CA certificate before starting MCP,
+then waits for MCP's local `/mcp` response before starting nginx. Health probes
+use local sockets only; they do not submit scans or call the upstream API.
 
 Generate the CA on the droplet and restart the stack:
 
@@ -830,6 +865,8 @@ Core:
 - `SCANMALWARE_TIMEOUT_S` (default `30`)
 - `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default `90`; the five slow aggregate and search tools listed under [Slow upstream queries](#slow-upstream-queries))
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default `10485760`)
+- `SCANMALWARE_MAX_JSON_BYTES` (default `10485760`; decoded successful JSON bodies)
+- `SCANMALWARE_MAX_ERROR_BYTES` (default `16384`; decoded error sample, marked when truncated)
 - `SCANMALWARE_ALLOW_HTTP` (default `false`)
 - `SCANMALWARE_ALLOW_PRIVATE_TARGETS` (default `false`)
 - `SCANMALWARE_BEARER_TOKEN` (optional; required for private scans)
@@ -874,15 +911,37 @@ mcpssh \
   "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
 
-The redeploy script stops all three containers (avoiding bind-mount inode
-issues), replaces everything under `/opt/scanmalware-mcp` except `logs/` while
-preserving the mitmproxy CA, then rebuilds and starts every image
-(`docker compose up -d --build`). Every service is down for the length of the
-rebuild. Files on the droplet that are not in git are deleted, for example
-anything put in the html root's `demo/` directory: copy them back afterwards, or
-use the [security release](#security-release-all-three-images) or MCP-only
-update below. If the script is not on the droplet yet, run the legacy tar + docker
-compose command once to install it.
+The redeploy script extracts into a sibling staging directory, preserves `.env`,
+`deploy/.env` and the mitmproxy CA, validates Compose and builds all images while
+the old stack runs. It then stops the containers, swaps releases (so bind mounts
+use the new inodes), moves the existing logs into the new tree, and starts with
+`--no-build --wait`. The default readiness budget is 120 seconds; override with
+`DEPLOY_WAIT_TIMEOUT_S`. Only the final switch needs downtime.
+
+A build failure leaves the running release in place and restores any retagged
+images. A startup/readiness failure restores the old files, settings and image
+tags and attempts to restart the old stack. If recovery itself fails, the script
+prints the protected backup/staging paths for manual recovery and leaves them
+intact. It never deletes logs. A sibling `.deploy-lock` directory prevents
+overlapping runs; after a killed process, confirm no deploy is running before
+removing a stale lock. Keep enough disk space for staging and previous images.
+
+For persistent configuration outside the release tree, use an absolute path:
+
+```bash
+DEPLOY_ENV_FILE=/etc/scanmalware-mcp.env bash deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz
+```
+
+That file is passed explicitly to every Compose invocation. Without an override,
+the script uses `deploy/.env`, then root `.env`, if present; both local files are
+preserved. Existing operator files take precedence over archive copies. The
+service remains public when no auth variables are configured.
+
+Other untracked files, such as an html `demo/` directory, are removed after a
+successful release; the [security release](#security-release-all-three-images)
+and MCP-only procedures below keep them. If the new script is not yet installed on the droplet, copy
+`deploy/redeploy.sh` there before invoking it; running the older script still
+uses its older deployment behavior.
 
 Optional one-shot helper from the repo root. It packs the working tree,
 uncommitted changes included, rather than a commit:

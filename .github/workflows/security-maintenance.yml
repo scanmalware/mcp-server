@@ -30,7 +30,7 @@ jobs:
         run: |
           docker run --rm --network none -v "$PWD/tests:/tests:ro" mcp-check python -m unittest discover -s /tests -v
           docker run --rm --network none -v "$PWD:/repo:ro" proxy-check python -m unittest discover -s /repo/tests/proxy -v
-          docker run --rm --network none nginx-check nginx -t
+          bash deploy/check_nginx.sh nginx-check
           python -m unittest discover -s tests/maintenance -v
       - name: Report proxy dependency advisories
         run: |

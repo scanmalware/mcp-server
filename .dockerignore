@@ -16,3 +16,5 @@ logs
 .env
 .env.*
 deploy/mitmproxy/state
+.security-harness
+.tools

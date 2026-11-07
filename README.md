@@ -45,6 +45,8 @@ Other env vars:
 - `SCANMALWARE_TIMEOUT_S` (default: `30`)
 - `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default: `90`; favicon and technology statistics, OCR text search, JS fingerprint similarity counts and behavioural signature search)
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default: `10485760`)
+- `SCANMALWARE_MAX_JSON_BYTES` (default: `10485760`; decoded JSON response limit)
+- `SCANMALWARE_MAX_ERROR_BYTES` (default: `16384`; error body sample, with truncation marked)
 - `SCANMALWARE_ALLOW_PRIVATE_TARGETS` (default: `false`)
 - `SCANMALWARE_CA_CERT` (optional; path to a CA bundle for SSL bump)
 
@@ -74,6 +76,17 @@ score 0-100. OCR search requires at least three characters after trimming.
 Library lookups use detected identifiers from `get_js_library_inventory`;
 `search_js_fingerprint_by_library` accepts `Next.js` as an alias for the
 detected identifier `nextjs`.
+
+Semantic search compares text with screenshot embeddings. Its default threshold
+is `-0.2`, with a supported range of `-1` to `1`; useful cross-modal thresholds
+are usually around `-0.3` to `0`.
+
+`wait_for_scan` bounds the whole operation, including upstream requests, retry
+backoff and sleeps. `timeout_s` must be greater than zero and at most 3600;
+`poll_interval_s` must be between 0.1 and 60. Retryable failures use backoff and
+honor `Retry-After` within that deadline. A timeout returns the last summary,
+or `status: "unknown"` and an empty summary if no poll succeeded. Submissions
+and other writes are not automatically retried.
 
 ## Scan visibility
 
@@ -272,10 +285,12 @@ scp -i /path/to/key /tmp/scanmalware-mcp.tar.gz root@<droplet-ip>:/tmp/
 ssh -i /path/to/key root@<droplet-ip> \
   "bash /opt/scanmalware-mcp/deploy/redeploy.sh /tmp/scanmalware-mcp.tar.gz"
 ```
-The redeploy script stops all three containers, replaces the files, and rebuilds
-and restarts every image (`docker compose up -d --build`), preserving the mitmproxy
-CA. It deletes files on the droplet that are not in git (everything outside `logs/`). If the script is not on the droplet yet, run the legacy tar + docker compose
-command once to install it.
+The redeploy script validates and builds in a staging directory while the current
+stack runs, then switches files and waits for readiness. It preserves `.env`,
+`deploy/.env`, the mitmproxy CA and logs. A failed build leaves the current stack
+running; a failed startup restores the prior files and image tags. Other
+untracked files are removed on a successful release. See the
+[runbook](docs/OPERATIONS.md#full-redeploy) for persistent configuration and recovery.
 
 Optional one-shot helper from the repo root (it packs the working tree, including
 uncommitted changes, rather than a commit):
