@@ -8,3 +8,16 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Production logs and data stay on the droplet; the repository is public.
+# tests/maintenance/test_repo_hygiene.py fails CI if any of this is tracked.
+/logs/
+*.log
+*.log.[0-9]*
+*.zst
+*.pcap
+*.pcapng
+*.har
+.env
+.env.*
+/deploy/nginx/html/demo/
