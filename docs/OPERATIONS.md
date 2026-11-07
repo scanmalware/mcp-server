@@ -225,12 +225,15 @@ Dependabot still ignores major `mcp` updates: 3.x will need its own port.
 
 ## Security maintenance
 
-The 2026-10-29 maintenance release uses Docker Engine 29.9.2 from Docker's
-signed Debian repository, Compose 5.6.1, containerd 2.4.2, Debian kernel 6.1.0-54,
-Python 3.14.9, MCP 2.3.0, Nginx 1.30.6 and mitmproxy 12.3.1. It followed the
-Brotli decoder flaw (CVE-2026-111497) and the Nginx 1.30.6 security fixes; the
-2026-10-02 release before it ran Docker Engine 29.8.2, Python 3.14.8, Nginx 1.30.5
-and mitmproxy 12.2.3.
+The 2026-11-07 maintenance release uses Docker Engine 29.9.3 from Docker's
+signed Debian repository, Compose 5.7.0, containerd 2.4.2, Debian kernel 6.1.0-54,
+Python 3.14.10, MCP 2.3.0, Nginx 1.30.6 and mitmproxy 12.3.1. It applies Docker
+29.9.3's security fixes (including BuildKit 0.34.2, used for the on-host image
+builds), Python 3.14.10 (tarfile CVE-2026-114583, ssl CVE-2026-115557), apt 3.0.4
+in the Debian-based images (CVE-2026-109518) and libexpat 2.10.0 in the Nginx
+image, from Alpine's refreshed `nginx:1.30.6-alpine`. The 2026-10-29 release
+before it ran Docker Engine 29.9.2, Compose 5.6.1 and Python 3.14.9, and followed
+the Brotli decoder flaw (CVE-2026-111497) and the Nginx 1.30.6 security fixes.
 Host Debian security updates remain automatic, but packages from Docker's
 repository and kernel reboots do not happen by themselves. Container image
 contents require a separate rebuild and deployment; restarting does not patch them.
@@ -256,7 +259,7 @@ uv run --no-project --with pip-audit pip-audit --no-deps --disable-pip -r deploy
 
 For a security-only release, `--upgrade-package <name>` in place of `--upgrade`
 limits the MCP lock to the affected packages (2026-10-29: certifi, setuptools,
-pip). A full refresh can move Pydantic, which generates the published tool
+pip; 2026-11-07: pip). A full refresh can move Pydantic, which generates the published tool
 schemas, and the directory reviews rescan any change to tools/list.
 
 The [GitHub security-maintenance workflow](../.github/workflows/security-maintenance.yml)
@@ -815,13 +818,13 @@ REV=<short commit id>
 B="/root/deploy-backup-$(date +%F)-pre-$REV"
 mkdir -p "$B"
 tar -cf "$B/files.tar" scanmalware_mcp pyproject.toml requirements.lock deploy/nginx/nginx.conf
-# Compose runs the image tagged security-20261029; keep the current one for rollback.
-docker tag scanmalware-mcp:security-20261029 "scanmalware-mcp:rollback-pre-$REV"
+# Compose runs the image tagged security-20261107; keep the current one for rollback.
+docker tag scanmalware-mcp:security-20261107 "scanmalware-mcp:rollback-pre-$REV"
 
 # Build from a staged copy, so the live tree is untouched until the image exists.
 rm -rf "/tmp/deploy-$REV" && mkdir "/tmp/deploy-$REV"
 tar -xzf /tmp/scanmalware-mcp.tar.gz -C "/tmp/deploy-$REV"
-(cd "/tmp/deploy-$REV" && nice docker build -q -t scanmalware-mcp:security-20261029 .)
+(cd "/tmp/deploy-$REV" && nice docker build -q -t scanmalware-mcp:security-20261107 .)
 
 # cp writes into existing files, keeping nginx.conf's inode: it is a single-file
 # bind mount, and a replaced file would be invisible to the running container.
@@ -848,7 +851,7 @@ mcpssh <<'SH'
 set -euo pipefail
 cd /opt/scanmalware-mcp
 REV=<short commit id>
-docker tag "scanmalware-mcp:rollback-pre-$REV" scanmalware-mcp:security-20261029
+docker tag "scanmalware-mcp:rollback-pre-$REV" scanmalware-mcp:security-20261107
 inode=$(stat -c %i deploy/nginx/nginx.conf)
 # GNU tar on the droplet writes into existing files, keeping the inode.
 tar -xf "/root/deploy-backup-<date>-pre-$REV/files.tar"
