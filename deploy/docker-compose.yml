@@ -19,6 +19,7 @@ services:
       - ../logs/mitmproxy:/var/log/mitmproxy
     environment:
       MITMPROXY_FULL_LOG: /var/log/mitmproxy/full.log
+      MITMPROXY_LOG_MAX_BODY_BYTES: "${MITMPROXY_LOG_MAX_BODY_BYTES:-65536}"
     command:
       - mitmdump
       - --listen-host
@@ -34,11 +35,21 @@ services:
       - --set
       - http3=false
       - --set
-      - store_streamed_bodies=true
+      - store_streamed_bodies=false
+      - --set
+      - "stream_large_bodies=${MITMPROXY_STREAM_LARGE_BODIES:-1m}"
+      - --set
+      - "body_size_limit=${MITMPROXY_BODY_SIZE_LIMIT:-64m}"
       - -s
       - /etc/mitmproxy/log_full.py
       - -s
       - /etc/mitmproxy/restrict_hosts.py
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; from pathlib import Path; assert Path('/home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem').is_file(); socket.create_connection(('127.0.0.1', 3128), timeout=2).close()"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 10s
     networks:
       scanmalware_net:
         ipv4_address: 172.28.0.11
@@ -48,6 +59,9 @@ services:
     container_name: deploy_mcp_1
     image: scanmalware-mcp:security-20261107
     logging: *bounded-logging
+    depends_on:
+      proxy:
+        condition: service_healthy
     build:
       context: ..
       dockerfile: Dockerfile
@@ -60,6 +74,8 @@ services:
       SCANMALWARE_TIMEOUT_S: "${SCANMALWARE_TIMEOUT_S:-30}"
       SCANMALWARE_SLOW_QUERY_TIMEOUT_S: "${SCANMALWARE_SLOW_QUERY_TIMEOUT_S:-90}"
       SCANMALWARE_MAX_DOWNLOAD_BYTES: "${SCANMALWARE_MAX_DOWNLOAD_BYTES:-10485760}"
+      SCANMALWARE_MAX_JSON_BYTES: "${SCANMALWARE_MAX_JSON_BYTES:-10485760}"
+      SCANMALWARE_MAX_ERROR_BYTES: "${SCANMALWARE_MAX_ERROR_BYTES:-16384}"
       SCANMALWARE_ALLOW_HTTP: "${SCANMALWARE_ALLOW_HTTP:-false}"
       SCANMALWARE_ALLOW_PRIVATE_TARGETS: "${SCANMALWARE_ALLOW_PRIVATE_TARGETS:-false}"
       SCANMALWARE_PROXY_URL: "${SCANMALWARE_PROXY_URL:-http://172.28.0.11:3128}"
@@ -113,10 +129,22 @@ services:
     build:
       context: ./nginx
     depends_on:
-      - mcp
+      mcp:
+        condition: service_started
     ports:
       - "80:80"
       - "443:443"
+    # The MCP readiness probe runs here, not in the mcp container: a healthcheck
+    # there would start a process as UID 10001 every interval, which the audit
+    # rule reports as code execution in that container (see docs/OPERATIONS.md,
+    # Security monitoring). Nginx runs as root and its image has curl.
+    healthcheck:
+      test: ["CMD-SHELL", "nginx -t -q && kill -0 $$(cat /var/run/nginx.pid) && [ \"$$(curl -s -o /dev/null -m 2 -w '%{http_code}' http://mcp:8000/mcp)\" = 405 ]"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+      start_interval: 2s
     volumes:
       - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./nginx/html:/usr/share/nginx/html:ro

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import base64
+import gzip
 import json
 import logging
 import unittest
@@ -12,6 +14,23 @@ from unittest.mock import AsyncMock, patch
 import httpx
 
 from scanmalware_mcp import server as module
+
+
+class TrackedStream(httpx.AsyncByteStream):
+    def __init__(self, chunks: list[bytes], *, delay: float = 0) -> None:
+        self.chunks = chunks
+        self.delay = delay
+        self.yielded = 0
+        self.closed = False
+
+    async def __aiter__(self):
+        for chunk in self.chunks:
+            await asyncio.sleep(self.delay)
+            self.yielded += 1
+            yield chunk
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
@@ -241,6 +260,111 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(result.get("isError"), result)
         self.assertEqual(len(self.requests), 1)
 
+    async def test_semantic_search_default_and_schema_match_cross_modal_scores(self) -> None:
+        tool = (await self.tools())["search_semantic"]
+        threshold = tool["inputSchema"]["properties"]["threshold"]
+        self.assertEqual((threshold["default"], threshold["minimum"], threshold["maximum"]), (-0.2, -1, 1))
+        for args, expected in (({}, "-0.2"), ({"threshold": -0.3}, "-0.3")):
+            result = await self.call("search_semantic", query="bank login", **args)
+            self.assertFalse(result.get("isError"), result)
+            self.assertEqual(self.requests[-1].url.params["threshold"], expected)
+        sent = len(self.requests)
+        for threshold in (-1.1, 1.1, "nan", "inf"):
+            self.assertTrue((await self.call("search_semantic", query="login", threshold=threshold))["isError"])
+        self.assertEqual(len(self.requests), sent)
+
+    async def test_wait_deadline_covers_errors_rate_limits_and_stalled_bodies(self) -> None:
+        for case in ("503", "network", "429", "stalled_body"):
+            with self.subTest(case=case):
+                stream = TrackedStream([b'{}'], delay=10 if case == "stalled_body" else 0)
+                self.upstream_timeout = case == "network"
+                self.route = lambda request: httpx.Response(
+                    429 if case == "429" else 200 if case == "stalled_body" else 503,
+                    headers={"retry-after": "30"}, stream=stream,
+                )
+                result = await asyncio.wait_for(
+                    self.call("wait_for_scan", scan_id=self.SCAN_ID, timeout_s=0.03, poll_interval_s=0.1), timeout=1
+                )
+                self.assertFalse(result.get("isError"), result)
+                self.assertTrue(result["structuredContent"]["timeout"])
+                if case != "network":
+                    self.assertTrue(stream.closed)
+
+    async def test_wait_rejects_unbounded_or_invalid_timing_without_upstream_calls(self) -> None:
+        for args in ({"timeout_s": 0}, {"timeout_s": -1}, {"timeout_s": 3601}, {"timeout_s": "nan"},
+                     {"poll_interval_s": 0}, {"poll_interval_s": -1}, {"poll_interval_s": 61},
+                     {"poll_interval_s": "inf"}):
+            with self.subTest(args=args):
+                self.assertTrue((await self.call("wait_for_scan", scan_id=self.SCAN_ID, **args))["isError"])
+        self.assertEqual(self.requests, [])
+
+    async def test_wait_honors_retry_after_before_recovering(self) -> None:
+        times: list[float] = []
+
+        def route(request):
+            times.append(asyncio.get_running_loop().time())
+            if len(times) == 1:
+                return httpx.Response(429, headers={"retry-after": "0.2"}, json={"detail": "busy"})
+            return httpx.Response(200, json={"status": "completed", "security_verdict": {"risk_level": "low"}})
+
+        self.route = route
+        result = await self.call("wait_for_scan", scan_id=self.SCAN_ID, timeout_s=2, poll_interval_s=0.1)
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(result["structuredContent"]["status"], "completed")
+        self.assertEqual(len(times), 2)
+        self.assertGreaterEqual(times[1] - times[0], 0.19)
+
+    async def test_json_and_binary_limits_stop_reading_and_close_streams(self) -> None:
+        for name, args, env_key in (
+            ("get_scan_result", {"scan_id": self.SCAN_ID}, "SCANMALWARE_MAX_JSON_BYTES"),
+            ("submit_scan", {"url": "https://example.com", "scan_type": "unlisted"}, "SCANMALWARE_MAX_JSON_BYTES"),
+            ("get_favicon", {"scan_id": self.SCAN_ID}, "SCANMALWARE_MAX_DOWNLOAD_BYTES"),
+        ):
+            with self.subTest(tool=name):
+                stream = TrackedStream([b'x' * 17, b'not consumed'])
+                self.route = lambda request: httpx.Response(200, stream=stream)
+                with patch.dict("os.environ", {env_key: "16"}):
+                    result = await self.call(name, **args)
+                self.assertTrue(result["isError"])
+                self.assertIn("exceeded 16 bytes", result["content"][0]["text"])
+                self.assertEqual(stream.yielded, 1)
+                self.assertTrue(stream.closed)
+
+    async def test_json_limit_counts_decompressed_bytes(self) -> None:
+        stream = TrackedStream([gzip.compress(json.dumps({"value": "x" * 128}).encode())])
+        self.route = lambda request: httpx.Response(200, headers={"content-encoding": "gzip"}, stream=stream)
+        with patch.dict("os.environ", {"SCANMALWARE_MAX_JSON_BYTES": "64"}):
+            result = await self.call("get_scan_result", scan_id=self.SCAN_ID)
+        self.assertIn("exceeded 64 bytes", result["content"][0]["text"])
+        self.assertTrue(stream.closed)
+
+    async def test_error_bodies_are_truncated_without_losing_status_or_draining(self) -> None:
+        for name, args in (("get_scan_result", {"scan_id": self.SCAN_ID}),
+                           ("get_favicon", {"scan_id": self.SCAN_ID}),
+                           ("get_netlog", {"scan_id": self.SCAN_ID}),
+                           ("submit_scan", {"url": "https://example.com", "scan_type": "unlisted"})):
+            with self.subTest(tool=name):
+                stream = TrackedStream([b'x' * 17, b'not consumed'])
+                self.route = lambda request: httpx.Response(503, stream=stream)
+                with patch.dict("os.environ", {"SCANMALWARE_MAX_ERROR_BYTES": "16"}):
+                    result = await self.call(name, **args)
+                text = result["content"][0]["text"]
+                self.assertIn("ScanMalware API error 503", text)
+                self.assertIn("[truncated]", text)
+                self.assertEqual(stream.yielded, 1)
+                self.assertTrue(stream.closed)
+
+    async def test_resource_templates_preserve_bytes_and_mime(self) -> None:
+        self.route = lambda request: httpx.Response(200, content=b'fixture')
+        for uri, mime in ((f"scanmalware://screenshot/{self.SCAN_ID}.png", "image/png"),
+                          (f"scanmalware://certificate/{self.SCAN_ID}.pem", "application/x-pem-file"),
+                          (f"scanmalware://pcap/{self.SCAN_ID}.pcap", "application/vnd.tcpdump.pcap"),
+                          ("scanmalware://rss/rss.xml", "application/rss+xml")):
+            with self.subTest(uri=uri):
+                content = (await self.rpc("resources/read", {"uri": uri}))["contents"][0]
+                self.assertEqual(content["mimeType"], mime)
+                self.assertEqual(base64.b64decode(content["blob"]), b'fixture')
+
     async def test_scan_visibility_is_preserved_and_invalid_values_are_rejected(self) -> None:
         for visibility in ("public", "unlisted", "private"):
             result = await self.call("submit_scan", url="https://example.com", scan_type=visibility)
@@ -414,7 +538,7 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
                     return httpx.Response(200, json=body)
 
                 self.route = route
-                result = await self.call("wait_for_scan", scan_id=self.SCAN_ID, poll_interval_s=0.01)
+                result = await self.call("wait_for_scan", scan_id=self.SCAN_ID, poll_interval_s=0.1)
                 self.assertFalse(result.get("isError"), result)
                 summary = result["structuredContent"]
                 self.assertEqual(summary["status"], statuses[-1])
@@ -448,7 +572,7 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.route = lambda request: httpx.Response(
             200, json={"scan_id": self.SCAN_ID, "status": next(replies), "security_verdict": {}}
         )
-        await self.call("wait_for_scan", scan_id=self.SCAN_ID, poll_interval_s=0.01)
+        await self.call("wait_for_scan", scan_id=self.SCAN_ID, poll_interval_s=0.1)
         end = [e for e in self.logged("mcp.tool.end") if e["tool"] == "wait_for_scan"][-1]
         self.assertEqual(end["upstream"], [f"GET /api/v1/scan/{self.SCAN_ID}/summary 200 x3"])
         self.assertEqual(end["upstream_total"], 3)
@@ -627,6 +751,8 @@ class ServerInternalsTests(unittest.IsolatedAsyncioTestCase):
         with ExitStack() as stack:
             stack.enter_context(patch.object(module, "_configure_logging"))
             stack.enter_context(patch.dict("os.environ", {"MCP_AUTH_TOKEN": "s3cret-token"}, clear=True))
+            stack.enter_context(patch.object(module, "_MCP_HTTP_LOGGING_ENABLED", True))
+            raw_log = stack.enter_context(patch.object(module, "_log_mcp_http_event"))
             stack.enter_context(
                 patch.object(module, "_get_shared_client", new=AsyncMock(return_value=(upstream, "https://scanmalware.com")))
             )
@@ -649,6 +775,8 @@ class ServerInternalsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(missing.status_code, 401)
         self.assertEqual(wrong.status_code, 401)
         self.assertEqual(right.status_code, 200, right.text)
+        self.assertNotIn("s3cret-token", str(raw_log.call_args_list))
+        self.assertIn("<redacted>", str(raw_log.call_args_list))
 
     async def test_production_host_header_is_accepted(self) -> None:
         # Production binds 0.0.0.0 behind nginx, which forwards

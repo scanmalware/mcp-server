@@ -17,10 +17,11 @@ Information We Collect
   codes, the ScanMalware API paths each call requested, and scan outcomes
   (submitted and final URL, visibility, status, risk). Full logs add complete
   arguments and results. Raw HTTP logs may include request and response headers
-  and bodies. If you send Authorization headers, those values may be captured in
-  raw logs.
-- Proxy data: mitmproxy logs include upstream requests and responses to
-  ScanMalware.com (including response bodies, usually base64 encoded).
+  and bodies. Authorization, Proxy-Authorization, Cookie, Set-Cookie and X-API-Key
+  header values are redacted. Secrets embedded in URLs or bodies may still be logged.
+- Proxy data: mitmproxy logs include upstream request/response metadata and
+  bounded body samples (base64 encoded). Large responses are streamed without
+  retaining their bodies. The same sensitive header values are redacted.
 
 How We Use Information
 - Provide and operate the Service.

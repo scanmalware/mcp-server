@@ -18,6 +18,11 @@ WORKDIR="${WORKDIR:-${REPO_ROOT}}"
 
 EXCLUDES=(
   --exclude .git
+  --exclude .security-harness
+  --exclude .tools
+  --exclude .env
+  --exclude '.env.*'
+  --exclude deploy/mitmproxy/state
   --exclude .venv
   --exclude __pycache__
   --exclude .mypy_cache

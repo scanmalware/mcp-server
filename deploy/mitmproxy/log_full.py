@@ -9,6 +9,10 @@ from mitmproxy import ctx, http
 
 
 LOG_PATH = os.getenv("MITMPROXY_FULL_LOG", "/var/log/mitmproxy/full.log")
+MAX_BODY_BYTES = int(os.getenv("MITMPROXY_LOG_MAX_BODY_BYTES", "65536"))
+if MAX_BODY_BYTES < 0:
+    raise ValueError("MITMPROXY_LOG_MAX_BODY_BYTES must be >= 0")
+_SECRET_HEADERS = {"authorization", "proxy-authorization", "cookie", "set-cookie", "x-api-key"}
 LOG_DIR = os.path.dirname(LOG_PATH)
 if LOG_DIR:
     os.makedirs(LOG_DIR, exist_ok=True)
@@ -18,13 +22,16 @@ def _b64(data: bytes | None) -> dict[str, Any] | None:
     if data is None:
         return None
     return {
-        "base64": base64.b64encode(data).decode("ascii"),
+        "base64": base64.b64encode(data[:MAX_BODY_BYTES]).decode("ascii"),
         "length": len(data),
+        "captured": min(len(data), MAX_BODY_BYTES),
+        "truncated": len(data) > MAX_BODY_BYTES,
     }
 
 
 def _headers(headers: http.Headers) -> list[list[str]]:
-    return [[name, value] for name, value in headers.items(multi=True)]
+    return [[name, "<redacted>" if name.lower() in _SECRET_HEADERS else value]
+            for name, value in headers.items(multi=True)]
 
 
 def _client_info(flow: http.HTTPFlow) -> dict[str, Any] | None:
@@ -53,8 +60,8 @@ def _server_info(flow: http.HTTPFlow) -> dict[str, Any] | None:
 
 def _message_body(message: http.Message) -> dict[str, Any] | None:
     data = message.raw_content
-    if data is None:
-        data = message.content
+    # Streamed content is deliberately not retained; never decode or reconstruct
+    # it for logging. Buffered bodies are sampled rather than copied in full.
     return _b64(data)
 
 
@@ -104,6 +111,8 @@ def load(_: Any) -> None:
             "event": "mitmproxy.startup",
             "stream_large_bodies": ctx.options.stream_large_bodies,
             "store_streamed_bodies": ctx.options.store_streamed_bodies,
+            "body_size_limit": ctx.options.body_size_limit,
+            "log_max_body_bytes": MAX_BODY_BYTES,
         }
     )
 
