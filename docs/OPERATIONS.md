@@ -54,6 +54,7 @@ Host scanmalware-mcp
 - Egress firewall: `/opt/scanmalware-mcp/deploy/iptables/lock-egress.sh` (rules in the `DOCKER-USER` chain)
 - Audit rules: `/etc/audit/rules.d/scanmalware-mcp.rules` (from `deploy/audit/`), log in `/var/log/audit/`
 - Security check: `/opt/scanmalware-mcp/deploy/security/security_check.py` (see [Security monitoring](#security-monitoring))
+- Log archive (one year, zstd): `/var/log/scanmalware-mcp-archive` (see [Long-term archive](#long-term-archive))
 - Files served but not in git, such as the `demo/` directory under the html root,
   live only on the droplet; a [full redeploy](#full-redeploy) deletes them.
 
@@ -278,6 +279,43 @@ protocol guards, direct-egress restrictions, certificate renewal and rotation.
 The Docker startup drop-in reapplies egress restrictions before containers start.
 Keep the previous snapshot until the new deployment has been observed healthy.
 
+Docker's packages come from Docker's repository, which unattended-upgrades
+does not cover, so upgrade them by hand (`apt-get install --only-upgrade
+docker-ce docker-ce-cli docker-compose-plugin containerd.io`). The daemon restart
+stops every container. Both times so far (2026-10-29 and 2026-11-07) dockerd
+brought back `mcp` and `proxy` but left `deploy_nginx_1` `Exited (0)`, despite
+`restart: unless-stopped`, and the site stayed down until it was started by hand.
+Straight after the upgrade, run `docker ps -a`, `docker start` any `deploy_*`
+container that is not up, and check that `/mcp` answers 405.
+
+To check the running or freshly built images for vulnerable packages without
+running anything in them, copy their package databases out and scan them
+locally. `docker exec` would show up as a HIGH finding in the
+[security check](#security-check-on-demand); `docker cp` from a running
+container, or from one made with `docker create`, runs nothing. Trivy needs
+`/etc/debian_version` to recognise the Debian images.
+
+```bash
+mcpssh <<'SH' | tar -xzf -
+set -e
+cd /tmp && rm -rf rfs && mkdir rfs
+for c in mcp proxy nginx; do
+  id=$(docker create "scanmalware-$c:security-20261107")
+  mkdir -p "rfs/$c/etc" "rfs/$c/var/lib/dpkg" "rfs/$c/lib/apk/db" "rfs/$c/usr/local/lib"
+  docker cp -L "$id:/etc/os-release" "rfs/$c/etc/os-release"
+  docker cp -L "$id:/etc/debian_version" "rfs/$c/etc/" 2>/dev/null || true
+  docker cp "$id:/var/lib/dpkg/status" "rfs/$c/var/lib/dpkg/" 2>/dev/null || true
+  docker cp "$id:/lib/apk/db/installed" "rfs/$c/lib/apk/db/" 2>/dev/null || true
+  docker cp "$id:/usr/local/lib/python3.14" "rfs/$c/usr/local/lib/" 2>/dev/null || true
+  docker rm -f "$id" >/dev/null
+done
+find rfs \( -name status -o -name installed -o -name os-release -o -name debian_version \
+  -o -path '*.dist-info/METADATA' \) -print0 | tar --null -czf - -T -
+rm -rf rfs
+SH
+for c in mcp proxy nginx; do trivy rootfs --quiet --scanners vuln --severity HIGH,CRITICAL "rfs/$c"; done
+```
+
 ### Remaining upstream advisories
 
 The MCP Python dependency lock has no known findings in the maintenance audit.
@@ -311,7 +349,7 @@ logs raw bodies without decoding them, and scanmalware.com sent no Brotli.
 
 Two files are persisted on the host and survive redeploys:
 
-- Sanitized log: `/opt/scanmalware-mcp/logs/mcp/mcp.log` (about ten months in Compose)
+- Sanitized log: `/opt/scanmalware-mcp/logs/mcp/mcp.log` (about five months on disk; a year in the [archive](#long-term-archive))
   - Includes session starts (client name/version, protocol version), tool/resource
     start/end/error/cancelled, args (sanitized), timing, user agent and IP fields.
   - Every event of a call carries its `call_id`. The end, error and cancelled
@@ -323,7 +361,7 @@ Two files are persisted on the host and survive redeploys:
     final URL, visibility, status, redirect count, risk. If the final URL or a
     redirect lands on a private, loopback or link-local address, an
     `mcp.scan.internal_target` WARNING follows. See [Security monitoring](#security-monitoring).
-- Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log` (about two and a half weeks in Compose)
+- Full log (args + result): `/opt/scanmalware-mcp/logs/mcp/mcp-full.log` (about two and a half weeks on disk; a year in the archive)
   - Includes full tool args and full tool results (no redaction).
 
 Rotation: 10 MiB max per file; Compose keeps 30 backups of `mcp.log` and 48 of
@@ -375,8 +413,11 @@ a start event.
   - Includes raw MCP HTTP request/response headers and bodies (base64) with per-request IDs.
   - Bodies are captured up to `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES` (default `1048576`, set to `0` for unlimited).
 
-Rotation: 10 MiB max per file; 112 backups in Compose (about 1.1 GiB, about ten days
-at ~115 MB a day, measured 2026-10-17), or 7 backups for the standalone server. Controlled by:
+Rotation: 10 MiB max per file; 112 backups in Compose (about 1.1 GiB), or 7
+backups for the standalone server. That held ten days at ~115 MB a day in
+mid-October 2026, but only about two days at ~530 MB a day by November, when
+Claude Code connections grew about 40-fold; the [archive](#long-term-archive)
+keeps a year. Controlled by:
 - `SCANMALWARE_MCP_HTTP_LOG_FILE`, `SCANMALWARE_MCP_HTTP_LOG_MAX_BYTES`, `SCANMALWARE_MCP_HTTP_LOG_BACKUP_COUNT`
 - `SCANMALWARE_MCP_HTTP_LOG_MAX_BODY_BYTES`
 
@@ -431,18 +472,19 @@ and closes its file for each event and recreates it on the next write. Neither
 uses `copytruncate`. See [Nginx log rotation](https://nginx.org/en/docs/control.html).
 
 MCP application, full-result, and raw HTTP logs continue using Python rotation,
-10 MiB per file. The Compose deployment keeps, at the volume measured on 2026-10-17
-(oldest entry per file set, read on the droplet):
+10 MiB per file. On disk the Compose deployment keeps, at the volume measured on
+2026-11-07 (oldest entry per file set, read on the droplet):
 
-| Log | Backups | Size | Covers about |
+| Log | Backups | Size | Covers about on disk |
 | --- | --- | --- | --- |
-| `mcp.log` | 30 | ~310 MiB | ten months (~10 days per file; logging began 2026-06-13, so it is not full yet) |
-| `mcp-full.log` | 48 | ~490 MiB | two and a half weeks (was two days with 7) |
-| `mcp-http.log` | 112 | ~1.1 GiB | ten days (was one week with 63, at a lower volume) |
+| `mcp.log` | 30 | ~310 MiB | five months (~5 days per file; logging began 2026-06-13, so it is not full yet) |
+| `mcp-full.log` | 48 | ~490 MiB | two and a half weeks |
+| `mcp-http.log` | 112 | ~1.1 GiB | two days (ten in mid-October, before Claude Code connections grew) |
 
-Nginx and the proxy keep 14 daily archives (above). The standalone server keeps
-7 backups of each MCP log. Rotation limits are volume-based, so they do not
-guarantee a fixed history window.
+Nginx and the proxy keep 14 daily archives (above), and auditd five 8 MB files
+(about nine days). The standalone server keeps 7 backups of each MCP log.
+Rotation limits are volume-based, so on its own the disk copy guarantees no
+fixed history window; the archive below does.
 
 Verify the installed configuration and timer:
 
@@ -450,6 +492,61 @@ Verify the installed configuration and timer:
 logrotate --debug --state /dev/null /etc/scanmalware-mcp/logrotate.conf
 systemctl list-timers scanmalware-logrotate.timer
 systemctl status scanmalware-logrotate.service --no-pager
+```
+
+### Long-term archive
+
+Every rotated log is also kept for **one year** in
+`/var/log/scanmalware-mcp-archive`, zstd-compressed:
+
+| Group | Source (rotated files only) |
+| --- | --- |
+| `mcp/` | `mcp.log`, `mcp-full.log`, `mcp-http.log` |
+| `nginx/` | `access.log`, `error.log` |
+| `mitmproxy/` | `full.log` |
+| `audit/` | `/var/log/audit/audit.log` |
+
+`scanmalware-log-archive.timer` runs
+[`archive_logs.py`](../deploy/logrotate/archive_logs.py) (installed as
+`/usr/local/sbin/scanmalware-archive-logs`) every ten minutes. It copies each
+rotated file once, never a live one, into `<group>/<year>/<month>/` under a
+name built from the file's first line, such as
+`mcp-http.log.20261107T104813Z.<hash>.zst`. That name does not change when a
+later rotation renames the file or logrotate gzips it, so each segment is stored
+exactly once. Archives whose first entry is older than 365 days are deleted
+(`--retention-days` changes this). The job never modifies the source logs.
+
+The archive is root-owned (`root:adm`, mode 0750), outside the release tree, so
+no redeploy touches it, and outside every container mount, so code in a
+container cannot alter it. It is not copied off the host (see
+[Decided against](#decided-against-october-2026)), and nothing under it, or
+under `logs/`, belongs in git. `.gitignore` excludes log, archive and capture
+files, and
+[`tests/maintenance/test_repo_hygiene.py`](../tests/maintenance/test_repo_hygiene.py)
+fails CI if a tracked file has a log-like path or contains log lines or a
+private key.
+
+zstd at level 10 shrinks the raw HTTP log about 100-fold, because the same
+large `tools/list` responses repeat, and the full log about eightfold. At the
+November 2026 volume a year takes roughly 2 GB for `mcp-http.log`, 1.2 GB for
+`mcp-full.log`, 1.5 GB for the proxy, 1.2 GB for audit and 0.4 GB for Nginx: about
+6–7 GB in total, with 38 GB free. The job prints a warning to its journal when
+less than 10% of the disk is free.
+
+The journal (SSH logins, firewall drops) is not archived: journald keeps it
+under its default size cap, 4 GB, and it held ten months (2.2 GB, back to
+January 2026) on 2026-11-07.
+
+Install with the [host rotation policy](#rotation-and-retention) (`install.sh`
+also needs `zstd`). Its first run archives every backup already on disk. Read the
+archive with the zstd tools:
+
+```bash
+systemctl list-timers scanmalware-log-archive.timer
+journalctl -u scanmalware-log-archive --since today   # archived=N bytes_in=... pruned=N
+du -sh /var/log/scanmalware-mcp-archive/*
+zstdgrep '"proxy.blocked"' /var/log/scanmalware-mcp-archive/mitmproxy/2026/11/*.zst
+zstdcat /var/log/scanmalware-mcp-archive/mcp/2026/11/mcp.log.*.zst | grep '"mcp.scan.internal_target"'
 ```
 
 ### Slow upstream queries
@@ -555,10 +652,10 @@ code execution inside the container invisible. What each layer now shows:
 
 | Question | Where to look |
 | --- | --- |
-| What did a client send, and did the call fail? | `mcp.log`: `mcp.tool.start` args, then end/error/cancelled (about ten months) |
+| What did a client send, and did the call fail? | `mcp.log`: `mcp.tool.start` args, then end/error/cancelled (five months on disk, a year in the [archive](#long-term-archive)) |
 | Which API paths did that call reach? | `upstream` on the end/error event; full exchanges in the proxy log via `X-MCP-Call-ID` = `call_id` |
 | Did a scan end on an internal address? | `mcp.scan.internal_target` WARNING in `mcp.log` |
-| What did the client get back? | `mcp-full.log` (two and a half weeks) and `mcp-http.log` (ten days) |
+| What did the client get back? | `mcp-full.log` (two and a half weeks on disk) and `mcp-http.log` (two days on disk); both a year in the archive |
 | Did code in the container try to reach anything else? | `proxy.blocked` in the proxy log; firewall drops in the kernel log |
 | Did anything run in the container, or change on the host? | auditd (below) |
 | Who logged in to the host? | `journalctl -u ssh` |
@@ -783,7 +880,8 @@ preserving the mitmproxy CA, then rebuilds and starts every image
 (`docker compose up -d --build`). Every service is down for the length of the
 rebuild. Files on the droplet that are not in git are deleted, for example
 anything put in the html root's `demo/` directory: copy them back afterwards, or
-use the MCP-only update below. If the script is not on the droplet yet, run the legacy tar + docker
+use the [security release](#security-release-all-three-images) or MCP-only
+update below. If the script is not on the droplet yet, run the legacy tar + docker
 compose command once to install it.
 
 Optional one-shot helper from the repo root. It packs the working tree,
@@ -863,6 +961,76 @@ else
 fi
 SH
 ```
+
+### Security release (all three images)
+
+Used for the 2026-10-29 and 2026-11-07 releases: all three images are rebuilt
+under a new tag while the old stack keeps serving, then swapped in. Total
+downtime was about 15 seconds, the time the new MCP process takes to start;
+untracked files such as `demo/` survive. The compose file on `main` names the
+new tag, for example `security-20261107`.
+
+1. Take a droplet snapshot, check `free -m`, and save a copy of the live
+   `tools/list` to compare afterwards. If Docker's packages need upgrading, do
+   that now, as described in [Security maintenance](#security-maintenance),
+   so the images are built with the patched BuildKit.
+2. Check the droplet still matches the commit it runs. Another session may have
+   hot-copied a file; the copy step below would overwrite it.
+
+   ```bash
+   OLD=<commit prod runs>
+   rm -rf /tmp/old && mkdir /tmp/old && git archive "$OLD" | tar -xf - -C /tmp/old
+   (cd /tmp/old && find . -type f -exec md5 -r {} + | sort -k2) > /tmp/old.md5
+   mcpssh 'cd /opt/scanmalware-mcp && find . -type f ! -path "./logs/*" \
+     ! -path "./deploy/mitmproxy/state/*" -exec md5sum {} + | sort -k2' > /tmp/live.md5
+   diff <(awk '{print $1, $2}' /tmp/old.md5) <(awk '{print $1, $2}' /tmp/live.md5)
+   ```
+
+   Expect only the untracked `demo/` video and `state/.gitkeep` to differ.
+3. Upload `git archive` of `main` as in [Full redeploy](#full-redeploy), then
+   back up and build:
+
+   ```bash
+   mcpssh <<'SH'
+   set -euo pipefail
+   REV=<short commit id>; TAG=security-<yyyymmdd>
+   B="/root/deploy-backup-$(date +%F)-pre-$REV"; mkdir -p "$B"
+   (cd /opt/scanmalware-mcp && tar -cf "$B/files.tar" --exclude=./logs .)
+   rm -rf "/tmp/deploy-$REV" && mkdir "/tmp/deploy-$REV"
+   tar -xzf /tmp/scanmalware-mcp.tar.gz -C "/tmp/deploy-$REV"
+   cd "/tmp/deploy-$REV"
+   nice docker build -q -t "scanmalware-mcp:$TAG" .
+   nice docker build -q -t "scanmalware-proxy:$TAG" deploy/mitmproxy
+   nice docker build -q -t "scanmalware-nginx:$TAG" deploy/nginx
+   SH
+   ```
+
+4. Optionally scan the new images with the `docker cp` method in
+   [Security maintenance](#security-maintenance) before swapping.
+5. Swap. `cp -a` keeps `nginx.conf`'s inode and does not delete untracked
+   files. `--no-build` makes Compose use the images just built.
+
+   ```bash
+   mcpssh <<'SH'
+   set -euo pipefail
+   REV=<short commit id>; cd /opt/scanmalware-mcp
+   inode=$(stat -c %i deploy/nginx/nginx.conf)
+   cp -a "/tmp/deploy-$REV/." .
+   [ "$inode" = "$(stat -c %i deploy/nginx/nginx.conf)" ] || echo "nginx.conf inode changed: restart nginx"
+   docker compose -f deploy/docker-compose.yml up -d --no-build
+   sleep 20; docker ps -a --format '{{.Names}} {{.Image}} {{.Status}}' | grep deploy_
+   grep '"mcp.startup"' logs/mcp/mcp.log | tail -1   # expect "ca_cert_loaded": true
+   SH
+   ```
+
+6. Verify: `/mcp` answers 405, `tools/list` is byte-identical to step 1, one
+   real tool call succeeds, the [egress check](#egress-restriction-scanmalware-only)
+   passes (it produces four expected HIGH findings), and
+   `security_check.py --hours 1` shows nothing else.
+
+Rollback: set the previous tag in `deploy/docker-compose.yml` (or restore
+`files.tar`) and run `docker compose -f deploy/docker-compose.yml up -d --no-build`.
+Keep the previous images and snapshot for a few days, then delete them.
 
 ### Rolling deploy (new droplet)
 
