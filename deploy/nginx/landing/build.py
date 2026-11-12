@@ -119,11 +119,37 @@ def render(code: str, strings: dict[str, dict[str, str]]) -> str:
     )
 
 
+def sitemap(strings: dict[str, dict[str, str]]) -> str:
+    # Every page lists every language version, as the pages' own hreflang links do.
+    links = [
+        f'    <xhtml:link rel="alternate" hreflang="{t["html_lang"]}" href="{SITE}/{c}/"/>' for c, t in strings.items()
+    ]
+    links.append(f'    <xhtml:link rel="alternate" hreflang="x-default" href="{SITE}/"/>')
+    urls = [f"{SITE}/"] + [f"{SITE}/{c}/" for c in strings]
+    body = "\n".join(f"  <url>\n    <loc>{u}</loc>\n" + "\n".join(links) + "\n  </url>" for u in urls)
+    return (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">\n'
+        f"{body}\n</urlset>\n"
+    )
+
+
+ROBOTS = f"""# mcp.scanmalware.com: the landing page, in every language. /mcp is the MCP endpoint, not a page.
+User-agent: *
+Disallow: /mcp
+Allow: /
+
+Sitemap: {SITE}/sitemap.xml
+"""
+
+
 def outputs() -> dict[Path, str]:
     strings = load_strings()
     pages = {HTML_DIR / "index.html": render(DEFAULT, strings)}
     for code in strings:
         pages[HTML_DIR / code / "index.html"] = render(code, strings)
+    pages[HTML_DIR / "sitemap.xml"] = sitemap(strings)
+    pages[HTML_DIR / "robots.txt"] = ROBOTS
     return pages
 
 

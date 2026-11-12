@@ -1,0 +1,6 @@
+# mcp.scanmalware.com: the landing page, in every language. /mcp is the MCP endpoint, not a page.
+User-agent: *
+Disallow: /mcp
+Allow: /
+
+Sitemap: https://mcp.scanmalware.com/sitemap.xml

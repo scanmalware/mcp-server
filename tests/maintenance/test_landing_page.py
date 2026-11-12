@@ -55,6 +55,14 @@ class LandingPageTests(unittest.TestCase):
                 for other in self.strings:
                     self.assertIn(f'<a href="/{other}/"', page)
 
+    def test_sitemap_and_robots_cover_every_language(self) -> None:
+        sitemap = (HTML / "sitemap.xml").read_text(encoding="utf-8")
+        locs = re.findall(r"<loc>([^<]+)</loc>", sitemap)
+        self.assertEqual(locs, ["https://mcp.scanmalware.com/"] + [f"https://mcp.scanmalware.com/{c}/" for c in self.strings])
+        robots = (HTML / "robots.txt").read_text(encoding="utf-8")
+        self.assertIn("Disallow: /mcp\n", robots)
+        self.assertIn("Sitemap: https://mcp.scanmalware.com/sitemap.xml", robots)
+
     def test_nginx_redirects_to_exactly_the_built_languages(self) -> None:
         conf = NGINX.read_text(encoding="utf-8")
         block = re.search(r"map \$http_accept_language \$landing_lang \{(.*?)\}", conf, re.S)
