@@ -50,7 +50,8 @@ Host scanmalware-mcp
   `html/{en,sv,es,zh-cn}/index.html`, generated: edit `deploy/nginx/landing/template.html` and
   `strings.json`, run `python3 deploy/nginx/landing/build.py`, commit the result
   (`tests/maintenance/test_landing_page.py` fails on a stale page). nginx sends `/` to the
-  browser's language (`map $landing_lang`); light/dark follows `html/theme.js`, the same
+  browser's language (`map $landing_lang`); `robots.txt` and `sitemap.xml` come from the same
+  build; light/dark follows `html/theme.js`, the same
   script as status.scanmalware.com. The html directory is mounted, so a file copy is live
   without a restart; an `nginx.conf` change needs `nginx -t` and a reload.
 - mitmproxy addon: `/opt/scanmalware-mcp/deploy/mitmproxy/log_full.py`
@@ -1052,7 +1053,9 @@ rm -f ~/.mcp_publisher_token   # the login token the publisher leaves behind
 ```
 
 Check the result: `curl -s 'https://registry.modelcontextprotocol.io/v0/servers?search=scanmalware'`
-must list the new version with `isLatest: true`. The `icons` entry points at
+must list the new version with `isLatest: true`. The hosted remote declares no headers: the server
+needs no key, and a declared secret header (0.2.1 had `Authorization: Bearer <token>`) makes
+registry-driven installers ask for one. The `icons` entry points at
 `https://mcp.scanmalware.com/icon.png` (`deploy/nginx/html/icon.png`, 512 x 512).
 
 ### Security release (all three images)

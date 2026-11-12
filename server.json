@@ -7,7 +7,7 @@
     "url": "https://github.com/scanmalware/mcp-server",
     "source": "github"
   },
-  "version": "0.2.1",
+  "version": "0.2.2",
   "websiteUrl": "https://mcp.scanmalware.com",
   "icons": [
     {
@@ -21,15 +21,7 @@
   "remotes": [
     {
       "type": "streamable-http",
-      "url": "https://mcp.scanmalware.com/mcp",
-      "headers": [
-        {
-          "name": "Authorization",
-          "description": "Optional Bearer token when MCP_AUTH_TOKEN is set.",
-          "isSecret": true,
-          "placeholder": "Bearer <token>"
-        }
-      ]
+      "url": "https://mcp.scanmalware.com/mcp"
     }
   ]
 }

@@ -30,6 +30,15 @@ class ReleaseMetadataTests(unittest.TestCase):
         server = (ROOT / "scanmalware_mcp/server.py").read_text()
         self.assertIn(f'Icon(src="{ICON["src"]}", mime_type="{ICON["mimeType"]}", sizes={ICON["sizes"]!r})'.replace("'", '"'), server)
 
+    def test_hosted_remote_asks_for_no_credentials(self) -> None:
+        # mcp.scanmalware.com runs without MCP_AUTH_TOKEN. A header declared on the hosted
+        # remote (0.2.1 listed a secret "Authorization: Bearer <token>") makes registry-driven
+        # installers prompt for a key that does not exist. Self-hosting keeps it in the README.
+        remotes = json.loads((ROOT / "server.json").read_text())["remotes"]
+        hosted = [r for r in remotes if r["url"] == "https://mcp.scanmalware.com/mcp"]
+        self.assertEqual(len(hosted), 1)
+        self.assertNotIn("headers", hosted[0])
+
 
 if __name__ == "__main__":
     unittest.main()
