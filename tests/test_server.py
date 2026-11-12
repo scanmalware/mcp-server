@@ -531,13 +531,8 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             info["icons"], [{"src": "https://mcp.scanmalware.com/icon.png", "mimeType": "image/png", "sizes": ["512x512"]}]
         )
-        # server.json is what the MCP registry publishes; it must describe the same release.
-        root = Path(module.__file__).resolve().parent.parent
-        published = json.loads((root / "server.json").read_text())
-        self.assertEqual(published["version"], module.__version__)
-        self.assertEqual(published["icons"], info["icons"])
-        self.assertIn(f'version = "{module.__version__}"', (root / "pyproject.toml").read_text())
-        self.assertTrue((root / "deploy" / "nginx" / "html" / "icon.png").is_file())
+        # server.json and the icon file are checked against the repo in
+        # tests/maintenance/test_release_metadata.py: this suite runs inside the image.
 
     async def test_descriptions_do_not_point_at_other_tools(self) -> None:
         # Directory review rejects descriptions that instruct the model to call
