@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ScanMalware MCP</title>
-    <link rel="icon" href="/favicon.ico" sizes="32x32" />
+    <link rel="icon" href="/favicon.ico" />
     <meta
       name="description"
       content="Hosted MCP server for ScanMalware.com: AI assistants submit URLs for scanning, read verdicts and evidence, and pivot across the public scan archive. No key or sign-in."
@@ -21,7 +21,7 @@
       }
       main {
         max-width: 760px;
-        margin: 6vh auto;
+        margin: 0 auto 6vh;
         padding: 32px;
         background: rgba(255, 255, 255, 0.9);
         border-radius: 20px;
@@ -80,15 +80,30 @@
       .lead {
         font-size: 1.1rem;
       }
+      .site {
+        max-width: 824px;
+        margin: 0 auto;
+        padding: 28px 0 12px;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px;
+      }
       .brand {
-        display: inline-block;
-        margin: 0 0 20px;
+        display: block;
+        line-height: 0;
       }
       .brand img {
         display: block;
-        width: 240px;
+        height: 28px;
+        width: auto;
         max-width: 100%;
-        height: auto;
+      }
+      .sub {
+        font-size: 18px;
+        padding-left: 12px;
+        border-left: 1px solid #e3e5e8;
+        color: #5f6368;
       }
       h3 {
         font-size: 1.05rem;
@@ -142,6 +157,15 @@
         color: #475569;
       }
       @media (max-width: 600px) {
+        .site {
+          padding: 20px 18px 12px;
+        }
+        .brand img {
+          height: 24px;
+        }
+        .sub {
+          font-size: 16px;
+        }
         main {
           margin: 0;
           border-radius: 0;
@@ -157,10 +181,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet" />
   </head>
   <body>
-    <main>
-      <a class="brand" href="https://scanmalware.com" rel="noopener"
-        ><img src="/scanmalware.svg" alt="ScanMalware.com" width="240" height="38"
+    <header class="site">
+      <a class="brand" href="https://scanmalware.com/"
+        ><img src="/scanmalware.svg" alt="ScanMalware" width="176" height="28"
       /></a>
+      <span class="sub">MCP</span>
+    </header>
+    <main>
       <h1>ScanMalware MCP</h1>
       <p class="lead">
         A hosted Model Context Protocol server for
