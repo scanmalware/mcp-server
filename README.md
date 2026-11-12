@@ -65,7 +65,7 @@ SSE transport: set `MCP_TRANSPORT=sse`, and optionally `MCP_SSE_MOUNT_PATH` to s
 it under a path prefix.
 
 Tool note: `submit_scan` does not call `/api/v1/csrf-token`; there is no CSRF token tool.
-Tool note: some upstream endpoints are disabled and excluded from the tool list (e.g., `get_improvements`, `find_screenshot_duplicates`, `get_ai_stats`, `search_js_fingerprinter2_code_hash`, `search_js_segments_by_tlsh`).
+Tool note: Not every public endpoint is a tool. Excluded: account, follow and submission endpoints that need a logged-in user; legacy aliases of an exposed endpoint; Atom feeds, sitemaps and health pings. `/ai/stats`, `/screenshot/duplicates`, `/js-segments/search/tlsh/{hash}` and `/js-fingerprinter2/search/code-hash/{hash}` were excluded while disabled upstream and answer again since November 2026; they are candidates to add.
 Filters: every search tool can be called with its defaults.
 `search_js_fingerprint_patterns` applies `has_eval=true` when no pattern filter
 is given, because the API requires one; `search_js_obfuscation` and
