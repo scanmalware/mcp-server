@@ -80,6 +80,17 @@
       .lead {
         font-size: 1.1rem;
       }
+      .visually-hidden {
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        margin: -1px;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
+        border: 0;
+      }
       .site {
         max-width: 824px;
         margin: 0 auto;
@@ -188,7 +199,7 @@
       <span class="sub">MCP</span>
     </header>
     <main>
-      <h1>ScanMalware MCP</h1>
+      <h1 class="visually-hidden">ScanMalware MCP</h1>
       <p class="lead">
         A hosted Model Context Protocol server for
         <a href="https://scanmalware.com" rel="noopener">scanmalware.com</a>. AI assistants and agents can
