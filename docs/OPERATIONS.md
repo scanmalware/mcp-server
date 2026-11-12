@@ -279,7 +279,7 @@ tests, and redeploy tests using a Docker stub. No test submits a live scan.
 
 Before a runtime upgrade or reboot, retain a droplet snapshot, the private
 configuration/CA backup and previous images. Build and test candidates first.
-After deployment, verify tools/list (128 tools), API requests, both proxy
+After deployment, verify tools/list (145 tools), API requests, both proxy
 protocol guards, direct-egress restrictions, certificate renewal and rotation.
 The Docker startup drop-in reapplies egress restrictions before containers start.
 Keep the previous snapshot until the new deployment has been observed healthy.
@@ -582,8 +582,10 @@ Ordinary API tools, including writes, are not automatically retried.
 
 ### Slow upstream queries
 
-Five tools use `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default 90 seconds), each
-because measured latency exceeded or approached the normal 30-second timeout:
+Ten tools use `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default 90 seconds). The first
+five were moved there because measured latency exceeded or approached the normal
+30-second timeout; the SMQL and CT-by-IP tools (2026-11-12) because the upstream
+documents long-running queries:
 
 | Tool | Observed latency |
 | --- | --- |
@@ -592,6 +594,10 @@ because measured latency exceeded or approached the normal 30-second timeout:
 | `get_jsfingerprint_similarity_counts` | ~31 s per call (2026-10-07) |
 | `search_js_runtime_by_signature` | 57–65 s cold, 0.2 s once cached |
 | `get_technology_stats` | 18 s median, 27 s max, three 30 s timeouts (week to 2026-10-08) |
+| `search_smql` | 7.6 s for a wildcard filter, 0.1–0.8 s otherwise (2026-11-12) |
+| `get_smql_facets`, `count_smql_queries` | 0.1–0.3 s; the API gives counts a longer budget on request |
+| `search_smql_domains` | 0.1–2.3 s; a wildcard over every CT log runs a minute or more and answers 202 meanwhile |
+| `get_ct_root_domains_by_ip` | 6.2 s, right after a 503 `back_pressure` (2026-11-12) |
 
 Other tools continue using `SCANMALWARE_TIMEOUT_S`. A client with a shorter
 timeout of its own may still give up first; that shows up as
@@ -1133,7 +1139,7 @@ doctl compute firewall create \
 ## Notes
 
 - Auth-gated endpoints and `/modules/*` tools are removed from the MCP server.
-- Upstream-disabled endpoints are excluded (e.g., `get_improvements`, `find_screenshot_duplicates`, `get_ai_stats`, `search_js_fingerprinter2_code_hash`, `search_js_segments_by_tlsh`).
+- Not every public endpoint is a tool. Excluded: account, follow and submission endpoints that need a logged-in user; legacy aliases of an exposed endpoint; Atom feeds, sitemaps and health pings. `/ai/stats`, `/screenshot/duplicates`, `/js-segments/search/tlsh/{hash}` and `/js-fingerprinter2/search/code-hash/{hash}` were excluded while disabled upstream and answer again since November 2026; they are candidates to add.
 - Every search tool works with its defaults; `search_js_fingerprint_patterns` applies `has_eval=true` when given no filter, because the API requires one.
 - Cloudflare proxying is disabled for `mcp.scanmalware.com`.
 - The MCP server is public; set `MCP_AUTH_TOKEN` if you want to restrict access.

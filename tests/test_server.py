@@ -134,7 +134,8 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("error", message, message)
         return message["result"]
 
-    async def call(self, name: str, **arguments: object) -> dict:
+    async def call(self, name: str, /, **arguments: object) -> dict:
+        # Positional-only: get_dns_history has a tool argument called "name".
         return await self.rpc("tools/call", {"name": name, "arguments": arguments})
 
     async def test_slow_queries_get_more_time_without_changing_other_tools(self) -> None:
@@ -147,7 +148,14 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             ("search_js_runtime_by_signature", {"signature": "fetch:4|complex"}, 90),
             # 18 s median, 27 s max and three 30 s timeouts in the week to 2026-10-08.
             ("get_technology_stats", {}, 90),
+            # SMQL wildcards measured 7.6 s, CT-by-IP 6.2 s after a 503 (2026-11-12).
+            ("search_smql", {"q": "domain:example.com"}, 90),
+            ("get_smql_facets", {"q": "domain:example.com"}, 90),
+            ("search_smql_domains", {"q": "ct_domain:*example*"}, 90),
+            ("count_smql_queries", {"queries": ["domain:example.com"]}, 90),
+            ("get_ct_root_domains_by_ip", {"ip_address": "192.0.2.1"}, 90),
             ("get_recent_scans", {}, 30),
+            ("get_dns_history", {"name": "example.com"}, 30),
         ):
             with self.subTest(tool=name):
                 result = await self.call(name, **args)
@@ -487,9 +495,9 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
     async def test_every_tool_explains_itself(self) -> None:
         # Directory review (OpenAI) requires each description to explain what the
         # tool does, when it is useful and its limits. One-line stubs such as
-        # "Get OCR stats." failed that bar for most of the 128 tools.
+        # "Get OCR stats." failed that bar for most of the then 128 tools.
         tools = await self.tools()
-        self.assertEqual(len(tools), 128)
+        self.assertEqual(len(tools), 145)
         for name, tool in tools.items():
             with self.subTest(tool=name):
                 self.assertGreaterEqual(len(tool.get("description") or ""), 60)
@@ -661,6 +669,227 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
                 result = await self.call("get_domain_stats", domain=value)
                 self.assertTrue(result.get("isError"), result)
         self.assertEqual(len(self.requests), sent)
+
+    async def test_endpoint_tools_send_the_documented_request(self) -> None:
+        # Paths and query parameters as the live OpenAPI spec gives them on
+        # 2026-11-12. The YARA tools moved to /hunting-rules/* when /yara/* left
+        # the spec, and the report list behind get_scan_reports began answering 401.
+        scan = self.SCAN_ID
+        sha256 = "78714F6F57C5177201837CE7A6185A2B2BB00A074883FC6CF03B8ADE192A20BA"
+        for name, args, path, params in (
+            ("get_scan_reports", {"scan_id": scan}, f"/api/v1/reports/{scan}/counts", {}),
+            ("get_yara_matches", {"scan_id": scan}, f"/api/v1/hunting-rules/scan/{scan}", {}),
+            ("get_yara_by_scan", {"scan_id": scan}, f"/api/v1/hunting-rules/{scan}", {}),
+            ("get_yara_stats", {}, "/api/v1/hunting-rules/stats", {}),
+            (
+                "get_recent_yara_threats",
+                {"hours": 168},
+                "/api/v1/hunting-rules/threats/recent",
+                {"hours": "168", "limit": "20"},
+            ),
+            (
+                "search_smql",
+                {"q": "  domain:paypal.com  "},
+                "/api/v1/search/smql",
+                {"q": "domain:paypal.com", "page": "1", "limit": "20", "sort": "newest"},
+            ),
+            (
+                "search_smql",
+                {"q": "title:login", "sort": "oldest", "count_only": True, "page": 1000},
+                "/api/v1/search/smql",
+                {"q": "title:login", "page": "1000", "limit": "20", "sort": "oldest", "count_only": "true"},
+            ),
+            (
+                "get_smql_facets",
+                {"q": "domain:paypal.com", "fields": "primary_asn,country", "size": 25, "sample": 100},
+                "/api/v1/search/smql/facets",
+                {"q": "domain:paypal.com", "fields": "primary_asn,country", "size": "25", "sample": "100"},
+            ),
+            (
+                "search_smql_domains",
+                {"q": "ct_ip:192.0.2.0/24", "limit": 500, "cursor": "example.org"},
+                "/api/v1/search/smql/domains",
+                {"q": "ct_ip:192.0.2.0/24", "limit": "500", "cursor": "example.org"},
+            ),
+            ("get_scan_pivot_values", {"scan_id": scan}, f"/api/v1/scans/{scan}/pivot-values", {}),
+            (
+                "get_ct_root_domains_by_ip",
+                {"ip_address": "192.0.2.1", "window": "extended"},
+                "/api/v1/ct/ip/192.0.2.1/domains",
+                {"window": "extended", "limit": "100"},
+            ),
+            ("get_dns_history", {"name": " paypal.com "}, "/api/v1/dns/history/paypal.com", {"limit": "100"}),
+            # A host address inside the network is reduced to the network; the
+            # "/" stays in its segment.
+            (
+                "search_reverse_dns",
+                {"kind": "ip", "value": "192.0.2.7/24"},
+                "/api/v1/dns/reverse/ip/192.0.2.0%2F24",
+                {"limit": "100"},
+            ),
+            (
+                "search_reverse_dns",
+                {"kind": "ip", "value": "2001:db8::1/128", "limit": 500},
+                "/api/v1/dns/reverse/ip/2001%3Adb8%3A%3A1",
+                {"limit": "500"},
+            ),
+            (
+                "search_reverse_dns",
+                {"kind": "verification", "value": "google-site-verification=abc"},
+                "/api/v1/dns/reverse/verification/google-site-verification%3Dabc",
+                {"limit": "100"},
+            ),
+            ("search_reverse_dns", {"kind": "ns", "value": "ns1.example.net"}, "/api/v1/dns/reverse/ns/ns1.example.net", {"limit": "100"}),
+            ("get_scan_dns", {"scan_id": scan}, f"/api/v1/dns/scan/{scan}", {}),
+            (
+                "get_domain_hosts",
+                {"domain": "paypal.com", "sources": ["observed", "static", "observed"], "subdomains_only": True},
+                "/api/v1/hosts/paypal.com",
+                {"sources": "observed,static", "subdomains_only": "true", "max_scans": "200", "limit": "500"},
+            ),
+            ("get_domain_hosts", {"domain": "paypal.com"}, "/api/v1/hosts/paypal.com", {"max_scans": "200", "limit": "500"}),
+            ("get_scan_deobfuscation", {"scan_id": scan}, f"/api/v1/scans/{scan}/deobfuscation", {}),
+            ("get_script_deobfuscation", {"fingerprint_id": 17144532}, "/api/v1/jsfingerprints/17144532/deobfuscation", {}),
+            (
+                "get_script_decoded_source",
+                {"fingerprint_id": 17144532},
+                "/api/v1/jsfingerprints/17144532/decoded-source",
+                {"part": "decoded-0"},
+            ),
+            (
+                "get_script_decoded_source",
+                {"fingerprint_id": 17144532, "part": "strings"},
+                "/api/v1/jsfingerprints/17144532/decoded-source",
+                {"part": "strings"},
+            ),
+            ("get_script_command_literals", {"fingerprint_id": 17144532}, "/api/v1/jsfingerprints/17144532/command-literals", {}),
+            ("get_file_analysis", {"sha256": sha256}, f"/api/v1/files/{sha256.lower()}", {}),
+        ):
+            with self.subTest(tool=name, args=args):
+                result = await self.call(name, **args)
+                self.assertFalse(result.get("isError"), result)
+                request = self.requests[-1]
+                self.assertEqual(request.method, "GET")
+                self.assertEqual(request.url.raw_path.split(b"?")[0], path.encode())
+                self.assertEqual(dict(request.url.params), params)
+
+    async def test_query_counts_and_scan_graph_post_their_body(self) -> None:
+        result = await self.call("count_smql_queries", queries=[" domain:example.com ", "title:login"], sites=True)
+        self.assertFalse(result.get("isError"), result)
+        request = self.requests[-1]
+        self.assertEqual((request.method, request.url.path), ("POST", "/api/v1/search/smql/counts"))
+        self.assertEqual(json.loads(request.content), {"queries": ["domain:example.com", "title:login"], "sites": True})
+        await self.call("count_smql_queries", queries=["domain:example.com"])
+        self.assertEqual(json.loads(self.requests[-1].content), {"queries": ["domain:example.com"]})
+
+        def graph(request: httpx.Request) -> httpx.Response:
+            # 20 real scans measured 1.47 MB, nearly all of it `pv`.
+            return httpx.Response(
+                200,
+                json={
+                    "scans": [
+                        {
+                            "scan_id": self.SCAN_ID,
+                            "title": "Example",
+                            "favicon": "data:image/png;base64,AAAA",
+                            "pv": {"resources": [{"sha256": "a" * 64}]},
+                        }
+                    ],
+                    "missing": [],
+                },
+            )
+
+        self.route = graph
+        result = await self.call("get_scan_graph", scan_ids=[self.SCAN_ID.upper(), self.SCAN_ID])
+        self.assertFalse(result.get("isError"), result)
+        request = self.requests[-1]
+        self.assertEqual((request.method, request.url.path), ("POST", "/api/v1/graph/scans"))
+        self.assertEqual(json.loads(request.content), {"scan_ids": [self.SCAN_ID]})
+        self.assertEqual(result["structuredContent"]["scans"], [{"scan_id": self.SCAN_ID, "title": "Example"}])
+        result = await self.call("get_scan_graph", scan_ids=[self.SCAN_ID], include_pivot_values=True)
+        entry = result["structuredContent"]["scans"][0]
+        self.assertEqual(entry["pv"], {"resources": [{"sha256": "a" * 64}]})
+        self.assertNotIn("favicon", entry)
+
+    async def test_smql_filters_list_names_until_a_category_is_chosen(self) -> None:
+        catalog = {
+            "filters": {
+                "Core": [{"name": "url", "type": "text", "examples": ["paypal.com"]}],
+                "DNS": [{"name": "dns_ip", "type": "text"}, {"name": "dns_mx", "type": "text"}],
+            },
+            "has_checks": [{"name": "malware", "description": "Malware detected by ClamAV"}],
+            "unavailable": [],
+            "syntax": {"filter": "field:value"},
+        }
+        self.route = lambda request: httpx.Response(200, json=catalog)
+        result = await self.call("get_smql_filters")
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(
+            result["structuredContent"],
+            {
+                "syntax": {"filter": "field:value"},
+                "has_checks": ["malware"],
+                "categories": {"Core": ["url"], "DNS": ["dns_ip", "dns_mx"]},
+                "unavailable": [],
+            },
+        )
+        result = await self.call("get_smql_filters", category=" dns ")
+        self.assertEqual(
+            result["structuredContent"],
+            {"category": "DNS", "filters": catalog["filters"]["DNS"], "syntax": {"filter": "field:value"}},
+        )
+        result = await self.call("get_smql_filters", category="Whois")
+        self.assertTrue(result.get("isError"), result)
+        self.assertIn("Core, DNS", json.dumps(result))
+
+    async def test_endpoint_tools_reject_bad_input_without_a_request(self) -> None:
+        scan = self.SCAN_ID
+        for name, args in (
+            ("search_smql", {"q": "   "}),
+            ("search_smql", {"q": "x" * 2001}),
+            ("search_smql", {"q": "domain:a.com", "page": 1001}),
+            ("search_smql", {"q": "domain:a.com", "limit": 101}),
+            ("search_smql", {"q": "domain:a.com", "sort": "relevance"}),
+            ("get_smql_facets", {"q": "domain:a.com", "size": 26}),
+            ("get_smql_facets", {"q": "domain:a.com", "sample": 99}),
+            ("get_smql_facets", {"q": "domain:a.com", "fields": "f" * 401}),
+            ("search_smql_domains", {"q": "ct_ip:192.0.2.1", "limit": 501}),
+            ("search_smql_domains", {"q": "ct_ip:192.0.2.1", "cursor": "c" * 254}),
+            ("count_smql_queries", {"queries": []}),
+            ("count_smql_queries", {"queries": ["domain:a.com"] * 26}),
+            ("count_smql_queries", {"queries": ["domain:a.com", " "]}),
+            ("get_scan_graph", {"scan_ids": []}),
+            ("get_scan_graph", {"scan_ids": [scan] * 21}),
+            ("get_scan_graph", {"scan_ids": [scan, "../recent"]}),
+            ("get_scan_pivot_values", {"scan_id": "../recent"}),
+            ("get_ct_root_domains_by_ip", {"ip_address": "example.com"}),
+            ("get_ct_root_domains_by_ip", {"ip_address": "192.0.2.1", "limit": 501}),
+            ("get_ct_root_domains_by_ip", {"ip_address": "192.0.2.1", "window": "all"}),
+            ("get_dns_history", {"name": ".."}),
+            ("get_dns_history", {"name": "example.com", "limit": 501}),
+            ("search_reverse_dns", {"kind": "ip", "value": "example.com"}),
+            ("search_reverse_dns", {"kind": "ip", "value": "10.0.0.0/8"}),
+            ("search_reverse_dns", {"kind": "ip", "value": "2001:db8::/31"}),
+            ("search_reverse_dns", {"kind": "txt", "value": "v=spf1"}),
+            ("search_reverse_dns", {"kind": "ns", "value": " "}),
+            ("get_scan_dns", {"scan_id": "../recent"}),
+            ("get_domain_hosts", {"domain": "example.com", "limit": 10001}),
+            ("get_domain_hosts", {"domain": "example.com", "max_scans": 0}),
+            ("get_domain_hosts", {"domain": "example.com", "sources": ["stream"]}),
+            ("get_domain_hosts", {"domain": ".."}),
+            ("get_script_decoded_source", {"fingerprint_id": 1, "part": "source"}),
+            ("get_script_decoded_source", {"fingerprint_id": 1, "part": "decoded-0/../x"}),
+            ("get_script_deobfuscation", {"fingerprint_id": 0}),
+            ("get_script_command_literals", {"fingerprint_id": -1}),
+            ("get_file_analysis", {"sha256": "abc"}),
+            ("get_file_analysis", {"sha256": "g" * 64}),
+            ("get_recent_yara_threats", {"hours": 169}),
+            ("get_recent_yara_threats", {"hours": 0}),
+        ):
+            with self.subTest(tool=name, args={k: str(v)[:40] for k, v in args.items()}):
+                result = await self.call(name, **args)
+                self.assertTrue(result.get("isError"), result)
+        self.assertEqual(self.requests, [])
 
     async def raw_post(self, payload: dict, accept: str | None) -> httpx.Response:
         request = self.client.build_request("POST", "/mcp", json=payload)

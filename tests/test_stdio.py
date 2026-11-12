@@ -26,7 +26,7 @@ class StdioTests(unittest.IsolatedAsyncioTestCase):
                     await session.initialize()
                     tools = await session.list_tools()
                     templates = await session.list_resource_templates()
-        self.assertEqual(len(tools.tools), 128)
+        self.assertEqual(len(tools.tools), 145)
         self.assertEqual(len(templates.resource_templates), 4)
         semantic = next(tool for tool in tools.tools if tool.name == 'search_semantic')
         self.assertEqual(semantic.input_schema['properties']['threshold']['default'], -0.2)

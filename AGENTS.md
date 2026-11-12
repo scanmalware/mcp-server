@@ -1,13 +1,13 @@
 # AGENTS.md
 
-This repo contains a Python **Model Context Protocol (MCP)** server that exposes the **ScanMalware.com** API as tools/resources for an MCP client (128 tools on mcp 2.3.0, served at `https://mcp.scanmalware.com/mcp`; operations in `docs/OPERATIONS.md`). The sections below are the original design notes; where they differ from the code, the code and the runbook are current.
+This repo contains a Python **Model Context Protocol (MCP)** server that exposes the **ScanMalware.com** API as tools/resources for an MCP client (145 tools on mcp 2.3.0, served at `https://mcp.scanmalware.com/mcp`; operations in `docs/OPERATIONS.md`). The sections below are the original design notes; where they differ from the code, the code and the runbook are current.
 
 ## API source of truth
 
 - OpenAPI spec: `https://scanmalware.com/openapi.json`
 - Base URL (OpenAPI omits `servers`): `https://scanmalware.com`
 - API prefix: `/api/v1`
-- OpenAPI currently lists ~146 paths / ~147 operations; many response schemas are `{}` (treat as untyped JSON and verify with live calls).
+- OpenAPI lists 242 operations as of November 2026 (it was ~147 when these notes were written); many response schemas are `{}` (treat as untyped JSON and verify with live calls).
 
 Practical note: some endpoints return **binary** despite the OpenAPI describing JSON:
 - `GET /api/v1/screenshot/{scan_id}` returns PNG bytes.
