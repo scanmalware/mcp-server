@@ -4,6 +4,10 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ScanMalware MCP</title>
+    <meta
+      name="description"
+      content="Hosted MCP server for ScanMalware.com: AI assistants submit URLs for scanning, read verdicts and evidence, and pivot across the public scan archive. No key or sign-in."
+    />
     <style>
       :root {
         color-scheme: light;
@@ -15,8 +19,8 @@
         color: #0f172a;
       }
       main {
-        max-width: 720px;
-        margin: 8vh auto;
+        max-width: 760px;
+        margin: 6vh auto;
         padding: 32px;
         background: rgba(255, 255, 255, 0.9);
         border-radius: 20px;
@@ -26,16 +30,43 @@
         font-size: 2.5rem;
         margin: 0 0 12px;
       }
+      h2 {
+        font-size: 1.25rem;
+        margin: 28px 0 10px;
+      }
+      p,
+      li {
+        line-height: 1.55;
+      }
       p {
-        line-height: 1.5;
-        margin: 0 0 16px;
+        margin: 0 0 14px;
+      }
+      ul {
+        margin: 0 0 14px;
+        padding-left: 1.25rem;
+      }
+      li {
+        margin-bottom: 6px;
       }
       code {
-        display: inline-block;
-        padding: 4px 8px;
+        padding: 2px 6px;
+        background: #e2e8f0;
+        border-radius: 6px;
+        font-size: 0.92em;
+        overflow-wrap: anywhere;
+      }
+      pre {
+        margin: 0 0 14px;
+        padding: 12px 14px;
         background: #0f172a;
         color: #f8fafc;
-        border-radius: 8px;
+        border-radius: 10px;
+        overflow-x: auto;
+      }
+      pre code {
+        padding: 0;
+        background: none;
+        color: inherit;
       }
       a {
         color: #2563eb;
@@ -45,9 +76,27 @@
       a:focus-visible {
         text-decoration: underline;
       }
+      .lead {
+        font-size: 1.1rem;
+      }
       .hint {
         font-size: 0.95rem;
         color: #475569;
+      }
+      footer {
+        margin-top: 28px;
+        font-size: 0.95rem;
+        color: #475569;
+      }
+      @media (max-width: 600px) {
+        main {
+          margin: 0;
+          border-radius: 0;
+          padding: 24px 18px;
+        }
+        h1 {
+          font-size: 2rem;
+        }
       }
     </style>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -57,17 +106,80 @@
   <body>
     <main>
       <h1>ScanMalware MCP</h1>
-      <p>
-        This server fronts the ScanMalware MCP tools and resources for
-        <a href="https://scanmalware.com" rel="noopener">scanmalware.com</a>.
+      <p class="lead">
+        A hosted Model Context Protocol server for
+        <a href="https://scanmalware.com" rel="noopener">scanmalware.com</a>. AI assistants and agents can
+        submit URLs for scanning, read the verdict and the evidence behind it, and pivot from one phishing
+        page to the rest of its campaign across the public scan archive. No API key or sign-in is needed.
       </p>
+
+      <h2>Connect</h2>
+      <p>Endpoint (Streamable HTTP): <code>https://mcp.scanmalware.com/mcp</code></p>
+      <ul>
+        <li>
+          <strong>Claude</strong> and <strong>ChatGPT</strong>: add ScanMalware from the connector or app
+          directory.
+        </li>
+        <li>
+          <strong>Claude Code</strong>:
+          <pre><code>claude mcp add --transport http scanmalware https://mcp.scanmalware.com/mcp</code></pre>
+          or install the
+          <a href="https://github.com/scanmalware/scanmalware-plugin" rel="noopener">ScanMalware plugin</a>
+          (also for Codex and Gemini CLI), which adds a skill for pivoting through phishing infrastructure.
+        </li>
+        <li><strong>Other clients</strong>: add a remote HTTP MCP server with the endpoint above.</li>
+      </ul>
+
+      <h2>What it can do</h2>
+      <p>More than 140 tools, all read-only except submitting a scan and voting on one:</p>
+      <ul>
+        <li>
+          <strong>Scanning</strong>: submit a URL, wait for it to finish, and read its summary, full result,
+          AI analysis and screenshot.
+        </li>
+        <li>
+          <strong>Evidence for one scan</strong>: indicators of compromise, hunting-rule matches, IDS alerts,
+          TLS and JARM details, technologies, registration data, DNS answers, clipboard and pastejacking
+          events, OCR text and network capture details.
+        </li>
+        <li>
+          <strong>Search and pivots</strong>: advanced search with facets and counts, DNS history and reverse
+          DNS, searches by IP address, network, nameserver, favicon, JARM, screenshot and fuzzy hashes, a
+          scan&rsquo;s searchable values, a side-by-side comparison of up to 20 scans, and the hosts seen for a
+          domain.
+        </li>
+        <li>
+          <strong>Certificate Transparency</strong>: certificates, subdomains, domains seen on an IP address,
+          lookalike domains and certificate history.
+        </li>
+        <li>
+          <strong>JavaScript and files</strong>: script fingerprints and libraries, what deobfuscating a
+          script revealed and its decoded source, checks for pasted shell commands, and the analysis of files
+          a page delivered.
+        </li>
+      </ul>
+      <p class="hint">
+        <code>tools/list</code> returns the current set. Resources serve screenshots (PNG), certificates (PEM),
+        packet captures and RSS feeds.
+      </p>
+
+      <h2>Scan visibility</h2>
       <p>
-        MCP endpoint:
-        <code>/mcp</code>
+        Every scan submission must choose its visibility. <code>public</code> publishes the URL and its result
+        in the public feed and search; <code>unlisted</code> keeps it out of listings, but anyone with the link
+        can open it. <code>private</code> needs a server configured with a ScanMalware account token, which
+        this hosted server is not. Use <code>unlisted</code> for anything confidential.
       </p>
       <p class="hint">
-        Use this URL in your MCP client: <code>https://mcp.scanmalware.com/mcp</code>
+        Page titles, OCR text, scripts and other scan content come from the scanned sites and are untrusted.
       </p>
+
+      <footer>
+        <a href="https://github.com/scanmalware/mcp-server" rel="noopener">Source</a> &middot;
+        <a href="https://github.com/scanmalware/mcp-server/blob/main/PRIVACY.md" rel="noopener">Privacy policy</a>
+        &middot; <a href="https://scanmalware.com/api-docs" rel="noopener">API documentation</a> &middot;
+        Run by Triop AB
+      </footer>
     </main>
   </body>
 </html>
