@@ -502,6 +502,38 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(tool=name):
                 self.assertGreaterEqual(len(tool.get("description") or ""), 60)
 
+    async def test_every_argument_explains_itself(self) -> None:
+        # Agents choose and fill tools from the argument descriptions in inputSchema, and
+        # directory scores count them; before 0.2.1 none of the 335 arguments had one.
+        tools = await self.tools()
+        for name, tool in tools.items():
+            for arg, prop in (tool["inputSchema"].get("properties") or {}).items():
+                description = prop.get("description") or ""
+                with self.subTest(tool=name, argument=arg):
+                    self.assertGreaterEqual(len(description), 15)
+                    for other in tools:
+                        if other != name:
+                            self.assertNotRegex(description, rf"\b{other}\b")
+
+    async def test_server_info_names_its_icon_and_website(self) -> None:
+        info = (
+            await self.rpc(
+                "initialize",
+                {
+                    "protocolVersion": "2025-06-18",
+                    "capabilities": {},
+                    "clientInfo": {"name": "regression-tests", "version": "1.0"},
+                },
+            )
+        )["serverInfo"]
+        self.assertEqual(info["version"], module.__version__)
+        self.assertEqual(info["websiteUrl"], "https://mcp.scanmalware.com")
+        self.assertEqual(
+            info["icons"], [{"src": "https://mcp.scanmalware.com/icon.png", "mimeType": "image/png", "sizes": ["512x512"]}]
+        )
+        # server.json and the icon file are checked against the repo in
+        # tests/maintenance/test_release_metadata.py: this suite runs inside the image.
+
     async def test_descriptions_do_not_point_at_other_tools(self) -> None:
         # Directory review rejects descriptions that instruct the model to call
         # other tools. A tool may describe its own inputs, not route the model.

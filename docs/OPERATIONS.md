@@ -1033,6 +1033,28 @@ fi
 SH
 ```
 
+### Publishing to the MCP registry
+
+`server.json` is the entry at registry.modelcontextprotocol.io (`com.scanmalware.mcp/scanmalware-mcp`).
+The registry refuses a version it already has, so bump the version in `server.json`,
+`pyproject.toml` and `scanmalware_mcp/__init__.py` together (a test checks they agree) and
+deploy before publishing. Ownership of the `com.scanmalware.mcp` namespace is proven over HTTP:
+the droplet serves the public key at `https://mcp.scanmalware.com/.well-known/mcp-registry-auth`
+(`v=MCPv1; k=ecdsap384; p=...`), and the matching ECDSA P-384 private key stays off the
+droplet and out of git, with the maintainer.
+
+```bash
+cd "$(mktemp -d)" && git -C /path/to/mcp-server show origin/main:server.json > server.json
+/path/to/mcp-server/.tools/mcp-publisher login http --domain mcp.scanmalware.com \
+  --algorithm ecdsap384 --private-key "<hex of the 48-byte private scalar>"
+/path/to/mcp-server/.tools/mcp-publisher publish
+rm -f ~/.mcp_publisher_token   # the login token the publisher leaves behind
+```
+
+Check the result: `curl -s 'https://registry.modelcontextprotocol.io/v0/servers?search=scanmalware'`
+must list the new version with `isLatest: true`. The `icons` entry points at
+`https://mcp.scanmalware.com/icon.png` (`deploy/nginx/html/icon.png`, 512 x 512).
+
 ### Security release (all three images)
 
 Used for the 2026-10-29 and 2026-11-07 releases: all three images are rebuilt
