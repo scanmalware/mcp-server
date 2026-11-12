@@ -4,6 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>ScanMalware MCP</title>
+    <link rel="icon" href="/favicon.ico" sizes="32x32" />
     <meta
       name="description"
       content="Hosted MCP server for ScanMalware.com: AI assistants submit URLs for scanning, read verdicts and evidence, and pivot across the public scan archive. No key or sign-in."
@@ -79,6 +80,58 @@
       .lead {
         font-size: 1.1rem;
       }
+      .brand {
+        display: inline-block;
+        margin: 0 0 20px;
+      }
+      .brand img {
+        display: block;
+        width: 240px;
+        max-width: 100%;
+        height: auto;
+      }
+      h3 {
+        font-size: 1.05rem;
+        margin: 0 0 8px;
+      }
+      .cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(290px, 1fr));
+        gap: 14px;
+        margin: 0 0 14px;
+      }
+      .card {
+        padding: 16px 18px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 14px;
+        min-width: 0;
+      }
+      .card p {
+        margin-bottom: 10px;
+      }
+      .card pre {
+        margin-bottom: 10px;
+        font-size: 0.85rem;
+        white-space: pre-wrap;
+        overflow-wrap: anywhere;
+      }
+      .card > :last-child {
+        margin-bottom: 0;
+      }
+      .button {
+        display: inline-block;
+        padding: 8px 14px;
+        background: #2563eb;
+        color: #fff;
+        border-radius: 10px;
+        font-weight: 600;
+      }
+      .button:hover,
+      .button:focus-visible {
+        background: #1d4ed8;
+        text-decoration: none;
+      }
       .hint {
         font-size: 0.95rem;
         color: #475569;
@@ -105,6 +158,9 @@
   </head>
   <body>
     <main>
+      <a class="brand" href="https://scanmalware.com" rel="noopener"
+        ><img src="/scanmalware.svg" alt="ScanMalware.com" width="240" height="38"
+      /></a>
       <h1>ScanMalware MCP</h1>
       <p class="lead">
         A hosted Model Context Protocol server for
@@ -113,22 +169,48 @@
         page to the rest of its campaign across the public scan archive. No API key or sign-in is needed.
       </p>
 
-      <h2>Connect</h2>
-      <p>Endpoint (Streamable HTTP): <code>https://mcp.scanmalware.com/mcp</code></p>
-      <ul>
-        <li>
-          <strong>Claude</strong> and <strong>ChatGPT</strong>: add ScanMalware from the connector or app
-          directory.
-        </li>
-        <li>
-          <strong>Claude Code</strong>:
+      <h2>Get it</h2>
+      <div class="cards">
+        <section class="card">
+          <h3>Claude</h3>
+          <p>Add ScanMalware from Claude&rsquo;s connector directory.</p>
+          <a class="button" href="https://claude.ai/directory/scanmalware" rel="noopener">Open in Claude</a>
+        </section>
+        <section class="card">
+          <h3>ChatGPT</h3>
+          <p>Add ScanMalware from ChatGPT&rsquo;s plugin directory.</p>
+          <a class="button" href="https://chatgpt.com/plugins/plugin_asdk_app_6ac75bbd39c08191ae95c30ac42638e0" rel="noopener"
+            >Open in ChatGPT</a
+          >
+        </section>
+        <section class="card">
+          <h3>Claude Code</h3>
+          <p>
+            The <a href="https://github.com/scanmalware/scanmalware-plugin" rel="noopener">ScanMalware plugin</a>
+            adds the server and a skill for pivoting through phishing infrastructure:
+          </p>
+          <pre><code>/plugin marketplace add scanmalware/scanmalware-plugin
+/plugin install scanmalware@scanmalware</code></pre>
+          <p class="hint">Only the server:</p>
           <pre><code>claude mcp add --transport http scanmalware https://mcp.scanmalware.com/mcp</code></pre>
-          or install the
-          <a href="https://github.com/scanmalware/scanmalware-plugin" rel="noopener">ScanMalware plugin</a>
-          (also for Codex and Gemini CLI), which adds a skill for pivoting through phishing infrastructure.
-        </li>
-        <li><strong>Other clients</strong>: add a remote HTTP MCP server with the endpoint above.</li>
-      </ul>
+        </section>
+        <section class="card">
+          <h3>Codex</h3>
+          <p>The same plugin, from its marketplace:</p>
+          <pre><code>codex plugin marketplace add scanmalware/scanmalware-plugin
+codex plugin add scanmalware@scanmalware</code></pre>
+        </section>
+        <section class="card">
+          <h3>Gemini CLI</h3>
+          <p>The plugin as a Gemini CLI extension:</p>
+          <pre><code>gemini extensions install https://github.com/scanmalware/scanmalware-plugin</code></pre>
+        </section>
+        <section class="card">
+          <h3>Any MCP client</h3>
+          <p>Add a remote server over Streamable HTTP, with no key or sign-in:</p>
+          <pre><code>https://mcp.scanmalware.com/mcp</code></pre>
+        </section>
+      </div>
 
       <h2>What it can do</h2>
       <p>More than 140 tools, all read-only except submitting a scan and voting on one:</p>
@@ -173,6 +255,23 @@
       <p class="hint">
         Page titles, OCR text, scripts and other scan content come from the scanned sites and are untrusted.
       </p>
+
+      <h2>More from ScanMalware</h2>
+      <ul>
+        <li>
+          <a href="https://github.com/scanmalware/scanmalware-cli" rel="noopener">Command-line tool</a>: submit
+          scans and search the archive from a terminal.
+        </li>
+        <li>
+          <a href="https://github.com/scanmalware/n8n-nodes-scanmalware" rel="noopener">n8n community node</a>,
+          verified by n8n, for automated workflows.
+        </li>
+        <li>
+          <a href="https://scanmalware.com/api-docs" rel="noopener">REST API</a>, which this server calls, and
+          the <a href="https://scanmalware.com/about" rel="noopener">integrations</a> with OpenCTI, MISP, TheHive
+          and other tools.
+        </li>
+      </ul>
 
       <footer>
         <a href="https://github.com/scanmalware/mcp-server" rel="noopener">Source</a> &middot;
