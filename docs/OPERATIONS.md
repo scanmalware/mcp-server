@@ -46,7 +46,13 @@ Host scanmalware-mcp
 - Repo checkout: `/opt/scanmalware-mcp`
 - Compose file: `/opt/scanmalware-mcp/deploy/docker-compose.yml`
 - Nginx config: `/opt/scanmalware-mcp/deploy/nginx/nginx.conf`
-- Landing page: `/opt/scanmalware-mcp/deploy/nginx/html/index.html`
+- Landing page: `/opt/scanmalware-mcp/deploy/nginx/html/index.html` (English, at `/`) and
+  `html/{en,sv,es,zh-cn}/index.html`, generated: edit `deploy/nginx/landing/template.html` and
+  `strings.json`, run `python3 deploy/nginx/landing/build.py`, commit the result
+  (`tests/maintenance/test_landing_page.py` fails on a stale page). nginx sends `/` to the
+  browser's language (`map $landing_lang`); light/dark follows `html/theme.js`, the same
+  script as status.scanmalware.com. The html directory is mounted, so a file copy is live
+  without a restart; an `nginx.conf` change needs `nginx -t` and a reload.
 - mitmproxy addon: `/opt/scanmalware-mcp/deploy/mitmproxy/log_full.py`
 - mitmproxy destination guard: `/opt/scanmalware-mcp/deploy/mitmproxy/restrict_hosts.py`
 - mitmproxy state (CA): `/opt/scanmalware-mcp/deploy/mitmproxy/state`
