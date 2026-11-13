@@ -154,6 +154,8 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             ("search_smql_domains", {"q": "ct_domain:*example*"}, 90),
             ("count_smql_queries", {"queries": ["domain:example.com"]}, 90),
             ("get_ct_root_domains_by_ip", {"ip_address": "192.0.2.1"}, 90),
+            # 20 s by curl, 22.8-23.9 s through MCP for limit=3 (2026-11-13).
+            ("search_by_jarm", {"jarm_signature": "2ad2ad0002ad2ad00042d42d0000005d86ccb1a0567e012264097a0315d7a7"}, 90),
             ("get_recent_scans", {}, 30),
             ("get_dns_history", {"name": "example.com"}, 30),
         ):
@@ -366,7 +368,8 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.route = lambda request: httpx.Response(200, content=b'fixture')
         for uri, mime in ((f"scanmalware://screenshot/{self.SCAN_ID}.png", "image/png"),
                           (f"scanmalware://certificate/{self.SCAN_ID}.pem", "application/x-pem-file"),
-                          (f"scanmalware://pcap/{self.SCAN_ID}.pcap", "application/vnd.tcpdump.pcap"),
+                          # The API serves the capture as .pcap.gz (application/gzip).
+                          (f"scanmalware://pcap/{self.SCAN_ID}.pcap", "application/gzip"),
                           ("scanmalware://rss/rss.xml", "application/rss+xml")):
             with self.subTest(uri=uri):
                 content = (await self.rpc("resources/read", {"uri": uri}))["contents"][0]
@@ -430,11 +433,92 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_present_favicon_is_returned(self) -> None:
         png = b"\x89PNG\r\n\x1a\nfavicon"
-        self.route = lambda request: httpx.Response(200, content=png, headers={"content-type": "image/png"})
+        self.route = lambda request: httpx.Response(
+            200,
+            content=png,
+            headers={"content-type": "image/png", "X-Favicon-MD5": "51b99ddea2eddb0ff44673bef2faad5f",
+                     "X-Favicon-MMH3": "-1269865183"},
+        )
         result = await self.call("get_favicon", scan_id=self.SCAN_ID)
         self.assertFalse(result.get("isError"), result)
-        self.assertEqual(result["structuredContent"]["found"], True)
-        self.assertEqual(result["structuredContent"]["size_bytes"], len(png))
+        favicon = result["structuredContent"]
+        self.assertEqual(favicon["found"], True)
+        self.assertEqual(favicon["size_bytes"], len(png))
+        # The hashes favicon search indexes are the original file's, sent as headers; a hash of
+        # the served copy changed on every request and matched nothing.
+        self.assertEqual(favicon["md5"], "51b99ddea2eddb0ff44673bef2faad5f")
+        self.assertEqual(favicon["mmh3"], -1269865183)
+        self.assertEqual(len(favicon["sha256"]), 64)
+
+    async def test_favicon_without_hash_headers_reports_no_hashes(self) -> None:
+        self.route = lambda request: httpx.Response(200, content=b"\x89PNG", headers={"content-type": "image/png"})
+        favicon = (await self.call("get_favicon", scan_id=self.SCAN_ID))["structuredContent"]
+        self.assertIsNone(favicon["md5"])
+        self.assertIsNone(favicon["mmh3"])
+
+    async def test_text_blocks_are_compact_json_mirroring_structured_content(self) -> None:
+        data = {"results": [{"scan_id": "a", "title": "Bank \u00e5\u00e4\u00f6 login"}], "pagination": {"page": 1}}
+        self.route = lambda request: httpx.Response(200, json=data)
+        result = await self.call("get_recent_scans")
+        [block] = result["content"]
+        self.assertNotIn("\n", block["text"])
+        self.assertIn("Bank \u00e5\u00e4\u00f6 login", block["text"])
+        self.assertEqual(json.loads(block["text"]), result["structuredContent"])
+        self.assertEqual(result["structuredContent"], data)
+        # A list result keeps the SDK's layout: one block per item, wrapped structured content.
+        rows = [{"cpe": "cpe:2.3:a:x:y"}, {"cpe": "cpe:2.3:a:z:w"}]
+        self.route = lambda request: httpx.Response(200, json=rows)
+        result = await self.call("get_cpe_by_scan", scan_id=self.SCAN_ID)
+        self.assertEqual([json.loads(block["text"]) for block in result["content"]], rows)
+        self.assertTrue(all("\n" not in block["text"] for block in result["content"]))
+        self.assertEqual(result["structuredContent"], {"result": rows})
+
+    async def test_fingerprint_id_must_be_positive_before_any_request(self) -> None:
+        for name in ("get_jsfingerprint", "get_jsfingerprint_similar", "get_jsfingerprint_similarity_counts",
+                     "get_jsfingerprint_source"):
+            with self.subTest(tool=name):
+                result = await self.call(name, fingerprint_id=0)
+                self.assertTrue(result.get("isError"), result)
+                self.assertIn("fingerprint_id must be >= 1", result["content"][0]["text"])
+        self.assertEqual(self.requests, [])
+
+    async def test_per_page_errors_name_per_page(self) -> None:
+        for name, args in (("search_js_fingerprint_obfuscated", {}),
+                           ("search_js_fingerprint_by_bundler", {"bundler_type": "webpack"}),
+                           ("search_js_fingerprint_by_library", {"library_name": "react"})):
+            with self.subTest(tool=name):
+                result = await self.call(name, per_page=0, **args)
+                self.assertTrue(result.get("isError"), result)
+                self.assertIn("per_page must be between 1 and 100", result["content"][0]["text"])
+        self.assertEqual(self.requests, [])
+
+    async def test_scan_date_must_be_a_calendar_date(self) -> None:
+        for value in ("2026-13-45", "2026-02-30", "yesterday", "2026-1-1", ""):
+            with self.subTest(scan_date=value):
+                result = await self.call("get_capabilities_by_date", scan_date=value)
+                self.assertTrue(result.get("isError"), result)
+                self.assertIn("scan_date must be a calendar date", result["content"][0]["text"])
+        self.assertEqual(self.requests, [])
+        result = await self.call("get_capabilities_by_date", scan_date=" 2026-11-01 ")
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(self.requests[-1].url.params["scan_date"], "2026-11-01")
+
+    async def test_library_stats_keep_the_most_common_libraries_and_versions(self) -> None:
+        # The API's default answer listed 18,293 libraries (3.1 MB; 9.4 MB on the MCP wire).
+        rows = [{"name": f"lib{i}", "count": i, "versions": {f"1.{v}": v for v in range(15)}} for i in range(150)]
+        self.route = lambda request: httpx.Response(200, json={"total_fingerprints": 7, "top_libraries": rows})
+        stats = (await self.call("get_jsfingerprint_library_stats"))["structuredContent"]
+        libraries = stats["top_libraries"]
+        self.assertEqual(len(libraries), 100)
+        self.assertEqual(libraries[0]["name"], "lib149")
+        self.assertEqual(list(libraries[0]["versions"]), [f"1.{v}" for v in range(14, 4, -1)])
+        self.assertEqual(libraries[0]["version_count"], 15)
+        self.assertEqual((stats["total_libraries"], stats["total_fingerprints"]), (150, 7))
+        self.assertIn("100 most common of 150", stats["note"])
+        small = [{"name": "react", "count": 9, "versions": {"18.2.0": 9}}]
+        self.route = lambda request: httpx.Response(200, json={"top_libraries": small})
+        stats = (await self.call("get_jsfingerprint_library_stats"))["structuredContent"]
+        self.assertEqual(stats, {"top_libraries": small, "total_libraries": 1})
 
     async def test_signature_is_sent_as_one_encoded_path_segment(self) -> None:
         result = await self.call("search_js_runtime_by_signature", signature="setTimeout:30|fetch:4/x?y#z")
