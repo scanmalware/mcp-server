@@ -618,6 +618,36 @@ def _check_new_scan(data: dict[str, Any], args: dict[str, Any], seeds: Seeds) ->
     return []
 
 
+def _check_compacted(data: dict[str, Any], args: dict[str, Any], seeds: Seeds) -> list[tuple[str, str, str]]:
+    issues = _check_status_completed(data, args, seeds)
+    if not isinstance(data.get("compacted"), list):
+        issues.append((FAIL, "shape", "compact result has no compacted list naming what was left out"))
+    elif "network_data" in data and isinstance(data["network_data"], dict) and "http_transactions" in data["network_data"]:
+        issues.append((FAIL, "shape", "compact result still carries network_data.http_transactions"))
+    return issues
+
+
+def _check_fingerprint_page(data: dict[str, Any], args: dict[str, Any], seeds: Seeds) -> list[tuple[str, str, str]]:
+    rows = data.get("fingerprints") or []
+    issues = []
+    if data.get("fingerprints_count") != len(rows):
+        issues.append((FAIL, "shape", f"fingerprints_count {data.get('fingerprints_count')} but {len(rows)} rows"))
+    total = data.get("total_scripts")
+    if isinstance(total, int) and total < len(rows) + args.get("offset", 0):
+        issues.append((FAIL, "shape", f"total_scripts {total} is below offset + rows"))
+    return issues
+
+
+def _check_versions_limit(data: dict[str, Any], args: dict[str, Any], seeds: Seeds) -> list[tuple[str, str, str]]:
+    cap = args.get("versions_limit")
+    over = [row.get("name") for row in data.get("top_libraries") or []
+            if isinstance(row, dict) and isinstance(row.get("versions"), dict) and len(row["versions"]) > cap]
+    issues = [(FAIL, "limit", f"versions_limit={cap} but these list more: {over[:5]}")] if over else []
+    if not isinstance(data.get("total_libraries"), int):
+        issues.append((FAIL, "shape", "no total_libraries"))
+    return issues
+
+
 def _yesterday(_: Seeds) -> str:
     return time.strftime("%Y-%m-%d", time.gmtime(time.time() - 86400))
 
@@ -632,7 +662,8 @@ def build_plan() -> list[Case]:
         Case("submit_scan", {"url": "$write_url", "scan_type": "unlisted"}, write=True, check=_check_new_scan),
         Case("get_scan_summary", {"scan_id": s}, check=_check_status_completed),
         Case("wait_for_scan", {"scan_id": s, "timeout_s": 30, "poll_interval_s": 1}, check=_check_wait),
-        Case("get_scan_result", {"scan_id": s}, check=_check_status_completed),
+        Case("get_scan_result", {"scan_id": s}, check=_check_compacted),
+        Case("get_scan_result", {"scan_id": s, "compact": False}, label="full", check=_check_status_completed),
         Case("get_scan_progress", {"scan_id": s}),
         Case("get_scan_pivot_values", {"scan_id": s}, check=_check_keys("scan_id", "resources", "scripts")),
         Case("get_scan_graph", {"scan_ids": [s, "$scan_id_2"]}, finds="scan_id"),
@@ -672,7 +703,7 @@ def build_plan() -> list[Case]:
         Case("get_netlog", {"scan_id": s}),
         Case("get_pcap_metadata", {"scan_id": s}),
         Case("get_js_runtime_behaviour", {"scan_id": s}),
-        Case("search_js_runtime_similar", {"scan_id": s, "limit": 3}),
+        Case("search_js_runtime_similar", {"scan_id": "$runtime_scan_id", "limit": 3}),
         # Domains, IPs, DNS, CT
         Case("get_domain_scans", {"domain": "$domain", "limit": 3}, nonempty=True),
         Case("get_domain_history", {"domain": "$domain", "limit": 3}, nonempty=True),
@@ -709,7 +740,7 @@ def build_plan() -> list[Case]:
         Case("search_tracking_key", {"tracker_type": "$tracker_type", "key": "$tracker_key", "limit": 3},
              nonempty=True),
         Case("search_js_runtime_by_composite_hash", {"composite_hash": "$runtime_composite", "limit": 3},
-             finds="scan_id"),
+             finds="runtime_scan_id"),
         Case("search_js_runtime_by_signature", {"signature": "$runtime_signature", "limit": 3}),
         # Threat feeds and AI
         Case("search_ai_high_risk", {"limit": 3}, nonempty=True),
@@ -757,7 +788,9 @@ def build_plan() -> list[Case]:
         Case("get_js_segments_unknown", {"scan_id": "$segment_scan_id", "limit": 3}),
         Case("run_js_differential_analysis", {"scan_id": "$fp_scan_id"}),
         # JavaScript fingerprints, from a script that is known to exist
-        Case("get_js_fingerprints", {"scan_id": "$fp_scan_id"}, nonempty=True),
+        Case("get_js_fingerprints", {"scan_id": "$fp_scan_id", "limit": 3}, nonempty=True, check=_check_fingerprint_page),
+        Case("get_js_fingerprints", {"scan_id": "$fp_scan_id", "limit": 2, "offset": 1}, label="offset=1",
+             check=_check_fingerprint_page),
         Case("get_js_library_inventory", {"library": "$js_library"}),
         Case("search_js_fingerprint_patterns", {"has_eval": True, "limit": 3}),
         Case("search_js_fingerprint_obfuscated", {"per_page": 3}, nonempty=True),
@@ -789,6 +822,8 @@ def build_plan() -> list[Case]:
         Case("get_jsfingerprint_hash_prevalence", {"scan_id": "$fp_scan_id"}),
         Case("get_jsfingerprint_bundle_stats", {}),
         Case("get_jsfingerprint_library_stats", {}),
+        Case("get_jsfingerprint_library_stats", {"limit": 5, "versions_limit": 3}, label="limit=5 versions_limit=3",
+             check=_check_versions_limit),
         # Deobfuscation, from a script the deobfuscator rated heavily obfuscated
         Case("get_scan_deobfuscation", {"scan_id": "$obf_scan_id"}),
         Case("get_script_deobfuscation", {"fingerprint_id": "$obf_fp_id"}),
@@ -1596,9 +1631,20 @@ class Runner:
         technologies = (tech or {}).get("technologies") or []
         seeds.set("tech_name", technologies[0].get("name") if technologies else None, "get_technologies_by_scan")
         seeds.set("tech_name", "WordPress", "fallback")
+        # Behavioural (runtime) pivots: the seed scan's own, else the first other candidate that has
+        # them. The API answers 400 "Target scan has no behavioral fingerprint" for scans without.
         behavioral = _first(runtime or {}, "behavioral") or {}
-        seeds.set("runtime_composite", behavioral.get("compositeHash"), "get_js_runtime_behaviour compositeHash")
-        seeds.set("runtime_signature", behavioral.get("signature"), "get_js_runtime_behaviour signature")
+        runtime_scan = chosen if behavioral.get("compositeHash") else None
+        for scan_id in [] if runtime_scan else others[:5]:
+            answer = await self.seed_call("get_js_runtime_behaviour", {"scan_id": scan_id}) or {}
+            behavioral = _first(answer, "behavioral") or {}
+            if behavioral.get("compositeHash"):
+                runtime_scan = scan_id
+                break
+        source = f"get_js_runtime_behaviour ({'seed scan' if runtime_scan == chosen else 'first candidate with one'})"
+        seeds.set("runtime_scan_id", runtime_scan, source)
+        seeds.set("runtime_composite", behavioral.get("compositeHash"), f"{source} compositeHash")
+        seeds.set("runtime_signature", behavioral.get("signature"), f"{source} signature")
         top = ((tracking or {}).get("results") or [{}])[0]
         seeds.set("tracker_type", top.get("tracker_type"), "get_top_tracking_keys results[0]")
         seeds.set("tracker_key", top.get("tracking_key"), "get_top_tracking_keys results[0]")

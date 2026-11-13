@@ -43,7 +43,7 @@ Other env vars:
 - `SCANMALWARE_BASE_URL` (default: `https://scanmalware.com`)
 - `SCANMALWARE_ALLOW_HTTP` (default: `false`)
 - `SCANMALWARE_TIMEOUT_S` (default: `30`)
-- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default: `90`; favicon and technology statistics, OCR text search, JS fingerprint similarity counts, behavioural signature search, SMQL, CT-by-IP and JARM search)
+- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default: `90`; favicon and technology statistics, OCR text search, JS fingerprint similarity counts, behavioural signature search, SMQL and CT-by-IP)
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default: `10485760`)
 - `SCANMALWARE_MAX_JSON_BYTES` (default: `10485760`; decoded JSON response limit)
 - `SCANMALWARE_MAX_ERROR_BYTES` (default: `16384`; error body sample, with truncation marked)

@@ -166,9 +166,9 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             ("search_smql_domains", {"q": "ct_domain:*example*"}, 90),
             ("count_smql_queries", {"queries": ["domain:example.com"]}, 90),
             ("get_ct_root_domains_by_ip", {"ip_address": "192.0.2.1"}, 90),
-            # 20 s by curl, 22.8-23.9 s through MCP for limit=3 (2026-11-13).
-            ("search_by_jarm", {"jarm_signature": "2ad2ad0002ad2ad00042d42d0000005d86ccb1a0567e012264097a0315d7a7"}, 90),
             ("get_recent_scans", {}, 30),
+            # 20-24 s until the API dropped a SELECT DISTINCT on 2026-11-13; about 1 s since.
+            ("search_by_jarm", {"jarm_signature": "2ad2ad0002ad2ad00042d42d0000005d86ccb1a0567e012264097a0315d7a7"}, 30),
             ("get_dns_history", {"name": "example.com"}, 30),
         ):
             with self.subTest(tool=name):
@@ -491,7 +491,10 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(tool=name):
                 result = await self.call(name, fingerprint_id=0)
                 self.assertTrue(result.get("isError"), result)
-                self.assertIn("fingerprint_id must be >= 1", result["content"][0]["text"])
+                text = result["content"][0]["text"]
+                # The schema's minimum is enforced before the tool runs.
+                self.assertIn("fingerprint_id", text)
+                self.assertIn("greater than or equal to 1", text)
         self.assertEqual(self.requests, [])
 
     async def test_per_page_errors_name_per_page(self) -> None:
@@ -501,7 +504,9 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
             with self.subTest(tool=name):
                 result = await self.call(name, per_page=0, **args)
                 self.assertTrue(result.get("isError"), result)
-                self.assertIn("per_page must be between 1 and 100", result["content"][0]["text"])
+                text = result["content"][0]["text"]
+                self.assertIn("per_page", text)
+                self.assertIn("greater than or equal to 1", text)
         self.assertEqual(self.requests, [])
 
     async def test_scan_date_must_be_a_calendar_date(self) -> None:
@@ -515,22 +520,63 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(result.get("isError"), result)
         self.assertEqual(self.requests[-1].url.params["scan_date"], "2026-11-01")
 
-    async def test_library_stats_keep_the_most_common_libraries_and_versions(self) -> None:
-        # The API's default answer listed 18,293 libraries (3.1 MB; 9.4 MB on the MCP wire).
-        rows = [{"name": f"lib{i}", "count": i, "versions": {f"1.{v}": v for v in range(15)}} for i in range(150)]
-        self.route = lambda request: httpx.Response(200, json={"total_fingerprints": 7, "top_libraries": rows})
-        stats = (await self.call("get_jsfingerprint_library_stats"))["structuredContent"]
-        libraries = stats["top_libraries"]
-        self.assertEqual(len(libraries), 100)
-        self.assertEqual(libraries[0]["name"], "lib149")
-        self.assertEqual(list(libraries[0]["versions"]), [f"1.{v}" for v in range(14, 4, -1)])
-        self.assertEqual(libraries[0]["version_count"], 15)
-        self.assertEqual((stats["total_libraries"], stats["total_fingerprints"]), (150, 7))
-        self.assertIn("100 most common of 150", stats["note"])
-        small = [{"name": "react", "count": 9, "versions": {"18.2.0": 9}}]
-        self.route = lambda request: httpx.Response(200, json={"top_libraries": small})
-        stats = (await self.call("get_jsfingerprint_library_stats"))["structuredContent"]
-        self.assertEqual(stats, {"top_libraries": small, "total_libraries": 1})
+    async def test_library_stats_are_limited_by_the_api(self) -> None:
+        # Unpaged, the API listed 18,293 libraries (3.1 MB; 9.4 MB on the MCP wire).
+        await self.call("get_jsfingerprint_library_stats")
+        self.assertEqual(dict(self.requests[-1].url.params), {"limit": "100", "versions_limit": "10"})
+        await self.call("get_jsfingerprint_library_stats", limit=5, versions_limit=0, min_count=50)
+        self.assertEqual(dict(self.requests[-1].url.params), {"limit": "5", "versions_limit": "0", "min_count": "50"})
+        sent = len(self.requests)
+        for args in ({"limit": 0}, {"limit": 1001}, {"versions_limit": -1}):
+            with self.subTest(args=args):
+                self.assertTrue((await self.call("get_jsfingerprint_library_stats", **args)).get("isError"))
+        self.assertEqual(len(self.requests), sent)
+
+    async def test_scan_result_is_compact_unless_asked(self) -> None:
+        await self.call("get_scan_result", scan_id=self.SCAN_ID)
+        self.assertEqual(dict(self.requests[-1].url.params), {"compact": "true"})
+        await self.call("get_scan_result", scan_id=self.SCAN_ID, compact=False)
+        self.assertEqual(dict(self.requests[-1].url.params), {})
+
+    async def test_js_fingerprints_are_paged(self) -> None:
+        await self.call("get_js_fingerprints", scan_id=self.SCAN_ID)
+        self.assertEqual(dict(self.requests[-1].url.params), {"limit": "20", "offset": "0"})
+        await self.call("get_js_fingerprints", scan_id=self.SCAN_ID, limit=100, offset=40, include_http_headers=False)
+        self.assertEqual(dict(self.requests[-1].url.params),
+                         {"limit": "100", "offset": "40", "include_http_headers": "false"})
+        sent = len(self.requests)
+        for args in ({"limit": 0}, {"limit": 101}, {"offset": -1}):
+            with self.subTest(args=args):
+                self.assertTrue((await self.call("get_js_fingerprints", scan_id=self.SCAN_ID, **args)).get("isError"))
+        self.assertEqual(len(self.requests), sent)
+
+    async def test_paging_bounds_are_in_the_schema_and_defaults_satisfy_them(self) -> None:
+        # The bounds were only in the descriptions, so a client could not check a call before
+        # making it. Every limit, per_page, page, offset and fingerprint_id now declares them.
+        tools = (await self.rpc("tools/list", {}))["tools"]
+
+        def bounds(spec: dict) -> dict:
+            options = [spec, *spec.get("anyOf", [])]
+            return {key: option[key] for option in options for key in ("minimum", "maximum") if key in option}
+
+        checked = 0
+        for tool in tools:
+            for name, spec in tool["inputSchema"].get("properties", {}).items():
+                if name not in {"limit", "per_page", "page", "offset", "fingerprint_id", "versions_limit"}:
+                    continue
+                with self.subTest(tool=tool["name"], argument=name):
+                    found = bounds(spec)
+                    self.assertIn("minimum", found)
+                    if name in {"limit", "per_page", "versions_limit"}:
+                        self.assertIn("maximum", found)
+                    default = spec.get("default")
+                    if isinstance(default, int):
+                        self.assertGreaterEqual(default, found["minimum"])
+                        self.assertLessEqual(default, found.get("maximum", default))
+                    checked += 1
+        self.assertGreater(checked, 120)
+        recent = next(tool for tool in tools if tool["name"] == "get_recent_scans")["inputSchema"]["properties"]
+        self.assertEqual((recent["limit"]["minimum"], recent["limit"]["maximum"], recent["page"]["minimum"]), (1, 100, 1))
 
     async def test_signature_is_sent_as_one_encoded_path_segment(self) -> None:
         result = await self.call("search_js_runtime_by_signature", signature="setTimeout:30|fetch:4/x?y#z")
