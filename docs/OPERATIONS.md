@@ -589,9 +589,9 @@ Ordinary API tools, including writes, are not automatically retried.
 
 ### Slow upstream queries
 
-Ten tools use `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default 90 seconds). The first
-five were moved there because measured latency exceeded or approached the normal
-30-second timeout; the SMQL and CT-by-IP tools (2026-11-12) because the upstream
+Eleven tools use `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default 90 seconds). The first
+five and `search_by_jarm` were moved there because measured latency exceeded or approached
+the normal 30-second timeout; the SMQL and CT-by-IP tools (2026-11-12) because the upstream
 documents long-running queries:
 
 | Tool | Observed latency |
@@ -605,6 +605,7 @@ documents long-running queries:
 | `get_smql_facets`, `count_smql_queries` | 0.1–0.3 s; the API gives counts a longer budget on request |
 | `search_smql_domains` | 0.1–2.3 s; a wildcard over every CT log runs a minute or more and answers 202 meanwhile |
 | `get_ct_root_domains_by_ip` | 6.2 s, right after a 503 `back_pressure` (2026-11-12) |
+| `search_by_jarm` | 20 s by curl, 22.8–23.9 s through MCP, for `limit=3` (2026-11-13; the API runs `SELECT DISTINCT` over every matching row before the limit) |
 
 Other tools continue using `SCANMALWARE_TIMEOUT_S`. A client with a shorter
 timeout of its own may still give up first; that shows up as
@@ -876,7 +877,7 @@ SH
 Core:
 - `SCANMALWARE_BASE_URL` (default `https://scanmalware.com`)
 - `SCANMALWARE_TIMEOUT_S` (default `30`)
-- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default `90`; the five slow aggregate and search tools listed under [Slow upstream queries](#slow-upstream-queries))
+- `SCANMALWARE_SLOW_QUERY_TIMEOUT_S` (default `90`; the eleven slow aggregate and search tools listed under [Slow upstream queries](#slow-upstream-queries))
 - `SCANMALWARE_MAX_DOWNLOAD_BYTES` (default `10485760`)
 - `SCANMALWARE_MAX_JSON_BYTES` (default `10485760`; decoded successful JSON bodies)
 - `SCANMALWARE_MAX_ERROR_BYTES` (default `16384`; decoded error sample, marked when truncated)
