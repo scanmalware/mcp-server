@@ -1,0 +1,45 @@
+<!--
+  Source of deploy/nginx/html/og.png, the 1200x630 image link previews show for mcp.scanmalware.com
+  (og:image / twitter:image, set by ../build.py). Same look as scanmalware.com/banner.jpg: #111111
+  background, brand blue #034afc, Space Grotesk. logo-white.svg is ../../html/scanmalware.svg with the
+  wordmark fill #111 changed to #ffffff. "140+ tools" matches the landing page, so the image does not
+  go stale when a tool is added. Render from the repository root (needs network for the font):
+
+  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --headless=new --disable-gpu \
+    --hide-scrollbars --force-device-scale-factor=1 --window-size=1200,630 --virtual-time-budget=10000 \
+    --screenshot="$PWD/deploy/nginx/html/og.png" "file://$PWD/deploy/nginx/landing/og/card.html"
+-->
+<!doctype html>
+<html><head><meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=block" rel="stylesheet">
+<style>
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #111111; }
+  body { font-family: "Space Grotesk", sans-serif; color: #ffffff; position: relative; }
+  .shape { position: absolute; }
+  .l1 { left: 0; top: 0; width: 120px; height: 630px; background: linear-gradient(180deg, rgba(3,74,252,0) 0%, #034afc 70%);
+        clip-path: polygon(0 0, 100% 0, 100% 62%, 0 92%); }
+  .l2 { left: 0; top: 0; width: 170px; height: 630px; background: linear-gradient(200deg, rgba(3,74,252,0.0) 30%, rgba(3,74,252,0.5) 100%);
+        clip-path: polygon(0 100%, 0 84%, 100% 60%, 100% 70%, 34% 100%); }
+  .r1 { right: 0; top: 0; width: 120px; height: 630px; background: linear-gradient(0deg, rgba(3,74,252,0) 0%, #034afc 70%);
+        clip-path: polygon(0 38%, 100% 8%, 100% 100%, 0 100%); }
+  .r2 { right: 0; top: 0; width: 230px; height: 630px; background: linear-gradient(20deg, rgba(3,74,252,0.55) 0%, rgba(3,74,252,0) 70%);
+        clip-path: polygon(72% 0, 100% 0, 100% 18%, 0 52%, 0 42%); }
+  .content { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 0 170px; }
+  .brand { display: flex; align-items: center; gap: 22px; }
+  .brand img { height: 66px; }
+  .mcp { font-weight: 600; font-size: 40px; line-height: 1; padding: 10px 18px 12px; border: 3px solid #034afc; border-radius: 14px; color: #ffffff; letter-spacing: 0.04em; }
+  h1 { margin: 54px 0 0; font-weight: 600; font-size: 50px; line-height: 1.12; letter-spacing: -0.01em; }
+  p { margin: 18px 0 0; font-size: 27px; line-height: 1.4; color: #b8bcc4; max-width: 740px; }
+  .url { margin-top: 44px; font-size: 26px; font-weight: 500; color: #ffffff; }
+  .url span { color: #6f9bff; }
+</style></head>
+<body>
+  <div class="shape l1"></div><div class="shape l2"></div><div class="shape r1"></div><div class="shape r2"></div>
+  <div class="content">
+    <div class="brand"><img src="logo-white.svg" alt=""><div class="mcp">MCP</div></div>
+    <h1>140+ tools for AI assistants</h1>
+    <p>Scan URLs, read the verdict and the evidence, and pivot across the public scan archive.</p>
+    <div class="url">mcp.scanmalware.com <span>·</span> no API key or sign-in</div>
+  </div>
+</body></html>

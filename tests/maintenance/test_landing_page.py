@@ -11,6 +11,7 @@ language needs a redirect and every redirect needs a page.
 import importlib.util
 import json
 import re
+import struct
 import unittest
 from pathlib import Path
 
@@ -54,6 +55,21 @@ class LandingPageTests(unittest.TestCase):
                 self.assertEqual(page.count('aria-current="true"'), 1)
                 for other in self.strings:
                     self.assertIn(f'<a href="/{other}/"', page)
+
+    def test_every_page_has_a_link_preview_image(self) -> None:
+        # Until 2026-11-13 a shared link to mcp.scanmalware.com showed no picture: no og: or
+        # twitter: tags. og.png is rendered from landing/og/card.html.
+        data = (HTML / "og.png").read_bytes()
+        self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertEqual(struct.unpack(">II", data[16:24]), (1200, 630))
+        self.assertLess(len(data), 300_000)
+        pages = {"index.html": "/"} | {f"{code}/index.html": f"/{code}/" for code in self.strings}
+        for name, path in pages.items():
+            page = (HTML / name).read_text(encoding="utf-8")
+            with self.subTest(page=name):
+                self.assertIn('<meta property="og:image" content="https://mcp.scanmalware.com/og.png" />', page)
+                self.assertIn('<meta name="twitter:card" content="summary_large_image" />', page)
+                self.assertIn(f'<meta property="og:url" content="https://mcp.scanmalware.com{path}" />', page)
 
     def test_sitemap_and_robots_cover_every_language(self) -> None:
         sitemap = (HTML / "sitemap.xml").read_text(encoding="utf-8")

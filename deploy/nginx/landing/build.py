@@ -27,6 +27,9 @@ HERE = Path(__file__).resolve().parent
 HTML_DIR = HERE.parent / "html"
 SITE = "https://mcp.scanmalware.com"
 DEFAULT = "en"
+# Link previews (Open Graph, X cards): one image for every language, rendered from og/card.html.
+OG_IMAGE = f"{SITE}/og.png"
+OG_LOCALES = {"en": "en_US", "sv": "sv_SE", "es": "es_ES", "zh-cn": "zh_CN"}
 
 # Light is the default; dark comes from the switch or the system setting, as on
 # status.scanmalware.com. --logo turns the dark-text logo white on dark.
@@ -94,7 +97,8 @@ def load_strings() -> dict[str, dict[str, str]]:
     return strings
 
 
-def render(code: str, strings: dict[str, dict[str, str]]) -> str:
+def render(code: str, strings: dict[str, dict[str, str]], path: str | None = None) -> str:
+    # path is where the page is served: "/" for the default-language copy, else "/<code>/".
     table = dict(strings[code])
     for key in ATTRIBUTE_KEYS:
         table[key] = html.escape(table[key], quote=True)
@@ -109,9 +113,16 @@ def render(code: str, strings: dict[str, dict[str, str]]) -> str:
             f'            <li><a href="/{c}/" hreflang="{t["html_lang"]}" lang="{t["html_lang"]}"{current}>'
             f"{html.escape(t['language_name'])}</a></li>"
         )
+    og_alternates = [
+        f'    <meta property="og:locale:alternate" content="{OG_LOCALES[c]}" />' for c in strings if c != code
+    ]
     template = Template((HERE / "template.html").read_text(encoding="utf-8"))
     return template.substitute(
         table,
+        page_url=SITE + (path or f"/{code}/"),
+        og_locale=OG_LOCALES[code],
+        og_locale_alternates="\n".join(og_alternates),
+        og_image=OG_IMAGE,
         alternates="\n".join(alternates),
         language_menu="\n".join(menu),
         light_vars=_vars(LIGHT, "light", " " * 8),
@@ -145,7 +156,7 @@ Sitemap: {SITE}/sitemap.xml
 
 def outputs() -> dict[Path, str]:
     strings = load_strings()
-    pages = {HTML_DIR / "index.html": render(DEFAULT, strings)}
+    pages = {HTML_DIR / "index.html": render(DEFAULT, strings, "/")}
     for code in strings:
         pages[HTML_DIR / code / "index.html"] = render(code, strings)
     pages[HTML_DIR / "sitemap.xml"] = sitemap(strings)
