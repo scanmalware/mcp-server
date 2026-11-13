@@ -88,6 +88,37 @@ honor `Retry-After` within that deadline. A timeout returns the last summary,
 or `status: "unknown"` and an empty summary if no poll succeeded. Submissions
 and other writes are not automatically retried.
 
+## Live QA sweep
+
+The unit tests in `tests/` mock the ScanMalware API. `qa/mcp_qa.py` is the opposite: an MCP
+client that calls every tool of a running server against the real API and checks every answer.
+It picks a well-populated recent scan, harvests real pivot values from it (domain, IP, ASN,
+JARM, favicon, screenshot and fuzzy hashes, JS fingerprint and segment IDs, a downloaded file),
+calls each tool with them, and checks JSON-RPC framing, `isError`, `structuredContent` against
+`outputSchema`, that the text block carries the same data, `limit`, the echoed `scan_id`, size
+and latency. It also lints `tools/list`, sends invalid and path-traversal arguments, reads the
+resource templates, and connects with the official SDK client over both `initialize` and
+`server/discover`.
+
+```bash
+uv venv /tmp/qa-venv --python 3.14
+uv pip install --python /tmp/qa-venv/bin/python -r requirements.lock
+/tmp/qa-venv/bin/python qa/mcp_qa.py                                        # this checkout, in-process
+/tmp/qa-venv/bin/python qa/mcp_qa.py --url https://mcp.scanmalware.com/mcp  # a deployment
+/tmp/qa-venv/bin/python qa/mcp_qa.py --only 'search_js*' -v --report /tmp/qa.json
+/tmp/qa-venv/bin/python qa/mcp_qa.py --probe get_scan_summary '{"scan_id": "<uuid>"}'
+```
+
+Locally the server runs in the same process behind uvicorn, so the sweep also sees which API
+path each call reached: rejected arguments must not reach the API at all, and free-text
+arguments must stay inside their own URL segment. A full local run is about 700 checks in
+under a minute. Remote runs send a smaller sample of invalid input and identify themselves as
+`User-Agent: scanmalware-mcp-qa/<version>`. The two write tools only get invalid input unless
+`--allow-writes` is passed, which submits one unlisted scan of `--write-target-url` and casts
+one `positive_feedback` vote on that new scan. Exit status: 0 when no check failed (warnings
+allowed), 1 when one did, 2 when the sweep could not run. Results depend on live data, so pass
+`--scan-id` to repeat a run against the same scan. Keep reports out of the repository.
+
 ## Scan visibility
 
 `submit_scan` requires `scan_type`; there is no default. A `public` scan puts the
