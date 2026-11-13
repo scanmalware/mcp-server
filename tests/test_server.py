@@ -138,6 +138,18 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         # Positional-only: get_dns_history has a tool argument called "name".
         return await self.rpc("tools/call", {"name": name, "arguments": arguments})
 
+    async def test_crafted_traceparent_does_not_stall_the_server(self) -> None:
+        # GHSA-mf5v-w3w3-f6cg / CVE-2026-126360: the SDK extracts W3C trace context from every
+        # request's _meta, and opentelemetry-api 1.45.1's traceparent regex backtracks
+        # quadratically on a valid prefix, a long run of spaces and a newline (which JSON allows).
+        # 16 KB took 1.25 s there and 1 MB would hold the event loop for over an hour; 1.45.2
+        # answers in milliseconds.
+        traceparent = "00-" + "1" * 32 + "-" + "2" * 16 + "-01-" + " " * 32_000 + "\nx"
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await self.rpc("tools/list", {"_meta": {"traceparent": traceparent}})
+        self.assertLess(loop.time() - started, 2.0)
+
     async def test_slow_queries_get_more_time_without_changing_other_tools(self) -> None:
         for name, args, expected in (
             ("get_favicon_stats", {}, 90),
