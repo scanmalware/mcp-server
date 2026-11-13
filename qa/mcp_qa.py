@@ -1666,9 +1666,10 @@ class Runner:
                             others: list[str]) -> None:
         """Favicon pivots from the first candidate scan that has a favicon.
 
-        Two MD5s exist: get_scan_result's favicon_hash.md5_hash is the original file's, and
-        get_favicon's md5 is of the copy ScanMalware stores. Both are seeded, as the plan checks
-        which of them search_by_favicon can find.
+        get_scan_result's favicon_hash.md5_hash is the original file's, the one search indexes.
+        get_favicon's md5 must be the same: until PR #28 it was a hash of the served copy, which
+        changes on every request and was never found. Both are seeded, and the plan checks that
+        search_by_favicon finds each of them.
         """
         for scan_id in [chosen, *others[:4]]:
             served = favicon if scan_id == chosen else await self.seed_call("get_favicon", {"scan_id": scan_id})
