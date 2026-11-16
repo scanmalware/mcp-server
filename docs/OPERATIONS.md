@@ -47,11 +47,16 @@ Host scanmalware-mcp
 - Compose file: `/opt/scanmalware-mcp/deploy/docker-compose.yml`
 - Nginx config: `/opt/scanmalware-mcp/deploy/nginx/nginx.conf`
 - Landing page: `/opt/scanmalware-mcp/deploy/nginx/html/index.html` (English, at `/`) and
-  `html/{en,sv,es,zh-cn}/index.html`, generated: edit `deploy/nginx/landing/template.html` and
-  `strings.json`, run `python3 deploy/nginx/landing/build.py`, commit the result
-  (`tests/maintenance/test_landing_page.py` fails on a stale page). nginx sends `/` to the
-  browser's language (`map $landing_lang`); `robots.txt` and `sitemap.xml` come from the same
-  build; light/dark follows `html/theme.js`, the same
+  `html/<code>/index.html` (`en`, `es`, `sv`, `zh-cn`), generated: edit
+  `deploy/nginx/landing/template.html` and `locales/<code>.json`, run
+  `python3 deploy/nginx/landing/build.py`, commit the result
+  (`tests/maintenance/test_landing_page.py` fails on a stale page). A new language is one
+  file, `locales/<code>.json`; `locales/README.md` is the brief for whoever translates it
+  (they need only that and `en.json`), and `build.py --validate FILE` checks a translation
+  that arrives from outside. nginx sends `/` to the browser's language: the
+  `map $landing_lang` block in `nginx.conf` is written by the same build, between the
+  `landing languages` markers, so a new language also needs the reload below. `robots.txt`
+  and `sitemap.xml` come from the same build; light/dark follows `html/theme.js`, the same
   script as status.scanmalware.com. The html directory is mounted, so a file copy is live
   without a restart; an `nginx.conf` change needs `nginx -t` and a reload.
 - mitmproxy addon: `/opt/scanmalware-mcp/deploy/mitmproxy/log_full.py`
