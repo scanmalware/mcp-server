@@ -343,7 +343,7 @@ mitmproxy 12.3.1 caps one library below available security fixes:
 
 | Library | Locked version | Remaining scope / action |
 | --- | --- | --- |
-| tornado | 6.5.10 | Header line folding, chunked-body and RedirectHandler advisories, fixed in 6.6; mitmdump runs no Tornado server or client, and mitmweb is not enabled here. |
+| tornado | 6.5.10 | Header line folding, chunked-body and RedirectHandler advisories, fixed in 6.6, and the RedirectHandler open-redirect follow-up (CVE-2026-126347, triple-slash paths, low severity), fixed in 6.6.1; mitmproxy 12.3.1 requires tornado<=6.5.10. mitmdump runs no Tornado server or client, and mitmweb is not enabled here. |
 
 These remain open package findings. The audit step reports each match and uses
 `deploy/mitmproxy/audit-baseline.json` to fail on new advisories, changed package
