@@ -37,8 +37,10 @@ NGINX_LINE = re.compile(
     r'^(?P<ip>\S+) \S+ \S+ \[(?P<ts>[^\]]+)\] "(?P<req>(?:[^"\\]|\\.)*)" (?P<status>\d{3}) (?P<bytes>\d+) '
     r'"(?:[^"\\]|\\.)*" "(?P<ua>(?:[^"\\]|\\.)*)"(?P<rest>.*)$'
 )
-# Paths the site is meant to serve with a 2xx.
+# Paths the site is meant to serve with a 2xx, besides the static files that
+# served_paths() finds in the html directory.
 NGINX_EXPECTED = re.compile(r"^(/|/index\.html|/mcp|/\.well-known/[^?]*|/demo/[^?]*)(\?.*)?$")
+HTML_DIR = "deploy/nginx/html"
 ENTRYPOINT = "/usr/local/bin/scanmalware-mcp"
 
 
@@ -279,9 +281,31 @@ def check_ssh(report: Report, since: float) -> None:
     report.add("INFO", f"{failed} failed or invalid SSH attempts (password login is disabled)")
 
 
+def served_paths(root: str) -> set[str]:
+    """URL paths of the static files nginx serves from the html directory.
+
+    The landing-page build writes robots.txt, sitemap.xml, icon.png, og.png,
+    theme.js and one index.html per language. A fixed list lagged behind it, so
+    every crawler fetching robots.txt showed up as MEDIUM. A file that is on
+    disk in the release tree is meant to be served; one that is not is still
+    reported.
+    """
+    html = os.path.join(root, HTML_DIR)
+    paths: set[str] = set()
+    for directory, _dirs, files in os.walk(html):
+        rel = os.path.relpath(directory, html).replace(os.sep, "/")
+        prefix = "/" if rel == "." else f"/{rel}/"
+        for name in files:
+            paths.add(prefix + name)
+            if name == "index.html":
+                paths.add(prefix)
+    return paths
+
+
 def check_nginx(report: Report, root: str, since: float) -> None:
     unexpected = Counter()
     errors = Counter()
+    served = served_paths(root)
     for path in files_since(os.path.join(root, "logs/nginx/access.log"), since):
         for line in read_lines(path):
             m = NGINX_LINE.match(line)
@@ -296,7 +320,8 @@ def check_nginx(report: Report, root: str, since: float) -> None:
             parts = m.group("req").split(" ")
             target = parts[1] if len(parts) == 3 else m.group("req")
             status = m.group("status")
-            if status.startswith("2") and not NGINX_EXPECTED.match(target):
+            expected = NGINX_EXPECTED.match(target) or target.split("?", 1)[0] in served
+            if status.startswith("2") and not expected:
                 unexpected[(target[:120], status, m.group("ip"))] += 1
             if status.startswith("5"):
                 errors[status] += 1

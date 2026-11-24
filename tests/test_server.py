@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import base64
+import datetime
 import gzip
 import json
 import logging
@@ -431,6 +432,67 @@ class ServerProtocolTests(unittest.IsolatedAsyncioTestCase):
         netlog = await self.call("get_netlog", scan_id=self.SCAN_ID)
         self.assertFalse(netlog.get("isError"), netlog)
         self.assertEqual(netlog["structuredContent"]["available"], False)
+
+    def ai_route(self, summary_status: int, summary: dict | None = None, ai_status: int = 404):
+        def route(request: httpx.Request) -> httpx.Response:
+            if request.url.path.startswith("/api/v1/ai/"):
+                if ai_status == 200:
+                    return httpx.Response(200, json={"scan_id": self.SCAN_ID, "results": {"analysis": {}}})
+                return httpx.Response(ai_status, json={"error": "AI analysis not found", "status_code": ai_status})
+            if request.url.path.endswith("/summary"):
+                return httpx.Response(summary_status, json=summary or {"error": "Scan not found"})
+            return None
+        return route
+
+    async def test_missing_ai_analysis_says_whether_it_is_coming(self) -> None:
+        # ChatGPT asked 0-20 s after completion, got a bare 404 error and gave up; the analysis
+        # lands 23-121 s after completion (2026-11-24).
+        now = datetime.datetime.now(datetime.timezone.utc)
+        ago = lambda seconds: (now - datetime.timedelta(seconds=seconds)).isoformat().replace("+00:00", "Z")
+        cases = [
+            ({"status": "completed", "completed_at": ago(10)}, "pending", 30),
+            ({"status": "completed", "completed_at": ago(200)}, "pending", 60),
+            ({"status": "completed", "completed_at": None}, "pending", 30),
+            ({"status": "processing", "completed_at": None}, "scan_running", 60),
+            ({"status": "queued"}, "scan_running", 60),
+            ({"status": "completed", "completed_at": ago(7200)}, "not_available", None),
+            ({"status": "error"}, "not_available", None),
+        ]
+        for summary, expected, retry in cases:
+            with self.subTest(summary=summary):
+                self.route = self.ai_route(200, summary)
+                result = await self.call("get_ai_analysis", scan_id=self.SCAN_ID)
+                self.assertFalse(result.get("isError"), result)
+                answer = result["structuredContent"]
+                self.assertIs(answer["found"], False)
+                self.assertEqual(answer["analysis_status"], expected)
+                self.assertEqual(answer.get("retry_after_s"), retry)
+                self.assertEqual(answer["scan_status"], summary["status"])
+                self.assertTrue(answer["note"])
+
+    async def test_ai_analysis_errors_that_are_not_timing_stay_errors(self) -> None:
+        # No such scan: the summary's 404 is the useful error.
+        self.route = self.ai_route(404)
+        result = await self.call("get_ai_analysis", scan_id=self.SCAN_ID)
+        self.assertTrue(result.get("isError"), result)
+        self.assertIn("Scan not found", result["content"][0]["text"])
+        # A failing analysis endpoint is not hidden behind a status lookup.
+        self.route = self.ai_route(200, {"status": "completed"}, ai_status=500)
+        result = await self.call("get_ai_analysis", scan_id=self.SCAN_ID)
+        self.assertTrue(result.get("isError"), result)
+        self.assertIn("ScanMalware API error 500", result["content"][0]["text"])
+        # When only the status lookup fails, the answer still says the analysis may be on its way.
+        self.route = self.ai_route(503, {"error": "busy"})
+        answer = (await self.call("get_ai_analysis", scan_id=self.SCAN_ID))["structuredContent"]
+        self.assertEqual(answer["analysis_status"], "unknown")
+        self.assertEqual(answer["retry_after_s"], 60)
+
+    async def test_present_ai_analysis_is_returned_unchanged(self) -> None:
+        self.route = self.ai_route(200, ai_status=200)
+        result = await self.call("get_ai_analysis", scan_id=self.SCAN_ID)
+        self.assertFalse(result.get("isError"), result)
+        self.assertEqual(result["structuredContent"], {"scan_id": self.SCAN_ID, "results": {"analysis": {}}})
+        self.assertFalse(any(r.url.path.endswith("/summary") for r in self.requests))
 
     async def test_streamed_upstream_errors_report_the_api_error(self) -> None:
         self.route = lambda request: self.streamed(500, {"error": "upstream broke"})
