@@ -238,15 +238,24 @@ Dependabot still ignores major `mcp` updates: 3.x will need its own port.
 
 ## Security maintenance
 
-The 2026-11-07 maintenance release uses Docker Engine 29.9.3 from Docker's
-signed Debian repository, Compose 5.7.0, containerd 2.4.2, Debian kernel 6.1.0-54,
-Python 3.14.10, MCP 2.3.0, Nginx 1.30.6 and mitmproxy 12.3.1. It applies Docker
-29.9.3's security fixes (including BuildKit 0.34.2, used for the on-host image
-builds), Python 3.14.10 (tarfile CVE-2026-114583, ssl CVE-2026-115557), apt 3.0.4
-in the Debian-based images (CVE-2026-109518) and libexpat 2.10.0 in the Nginx
-image, from Alpine's refreshed `nginx:1.30.6-alpine`. The 2026-10-29 release
-before it ran Docker Engine 29.9.2, Compose 5.6.1 and Python 3.14.9, and followed
-the Brotli decoder flaw (CVE-2026-111497) and the Nginx 1.30.6 security fixes.
+The 2026-11-24 maintenance release (images tagged `security-20261124`) uses
+Docker Engine 29.10.0 from Docker's signed Debian repository, Compose 5.8.0,
+containerd 2.4.2, Debian kernel 6.1.0-56, Python 3.14.10, MCP 2.3.0, Nginx 1.30.8
+and mitmproxy 12.3.1. It moves Nginx from 1.30.6 to 1.30.8 for the 1.30.7 and 1.30.8
+security fixes. The one that applied to this configuration was CVE-2026-118899: a
+worker can loop forever while reading a request body over TLS, which every `/mcp`
+POST does. The others need features this server does not enable: HTTP/2
+(CVE-2026-123007, CVE-2026-123633), HTTP/3, mail, stream, `resolver`, `try_files`
+with `alias`, and `ssl_early_data`. Docker 29.10.0 brings BuildKit 0.35.0 for the
+on-host builds. Its one breaking change, that loopback registries are no longer
+insecure when `insecure-registries` is set, does not apply here.
+
+The 2026-11-07 release before it ran Docker Engine 29.9.3, Compose 5.7.0, kernel
+6.1.0-54 and Nginx 1.30.6. It applied Python 3.14.10 (tarfile CVE-2026-114583, ssl
+CVE-2026-115557), apt 3.0.4 in the Debian-based images (CVE-2026-109518) and
+libexpat 2.10.0 in the Nginx image. The 2026-10-29 release ran Docker Engine 29.9.2,
+Compose 5.6.1 and Python 3.14.9, and followed the Brotli decoder flaw
+(CVE-2026-111497) and the Nginx 1.30.6 security fixes.
 Host Debian security updates remain automatic, but packages from Docker's
 repository and kernel reboots do not happen by themselves. Container image
 contents require a separate rebuild and deployment; restarting does not patch them.
@@ -317,7 +326,7 @@ mcpssh <<'SH' | tar -xzf -
 set -e
 cd /tmp && rm -rf rfs && mkdir rfs
 for c in mcp proxy nginx; do
-  id=$(docker create "scanmalware-$c:security-20261107")
+  id=$(docker create "scanmalware-$c:security-20261124")
   mkdir -p "rfs/$c/etc" "rfs/$c/var/lib/dpkg" "rfs/$c/lib/apk/db" "rfs/$c/usr/local/lib"
   docker cp -L "$id:/etc/os-release" "rfs/$c/etc/os-release"
   docker cp -L "$id:/etc/debian_version" "rfs/$c/etc/" 2>/dev/null || true
@@ -347,7 +356,9 @@ mitmproxy 12.3.1 caps one library below available security fixes:
 
 These remain open package findings. The audit step reports each match and uses
 `deploy/mitmproxy/audit-baseline.json` to fail on new advisories, changed package
-versions, or an overdue review (2026-12-01). Do not override upstream dependency bounds just to make the
+versions, or an overdue review (2027-01-04). On 2026-11-24 mitmproxy 12.3.1 was
+still the newest release and still required tornado<=6.5.10, so the review only moved
+the date. Do not override upstream dependency bounds just to make the
 audit green; test a compatible upstream release when one becomes available.
 mitmproxy 12.3.1 lifted the earlier caps on cryptography (now 50.0.2), h2 (4.4.1)
 and Brotli (1.2.1), and no longer depends on msgpack.
@@ -994,13 +1005,13 @@ REV=<short commit id>
 B="/root/deploy-backup-$(date +%F)-pre-$REV"
 mkdir -p "$B"
 tar -cf "$B/files.tar" scanmalware_mcp pyproject.toml requirements.lock deploy/nginx/nginx.conf
-# Compose runs the image tagged security-20261107; keep the current one for rollback.
-docker tag scanmalware-mcp:security-20261107 "scanmalware-mcp:rollback-pre-$REV"
+# Compose runs the image tagged security-20261124; keep the current one for rollback.
+docker tag scanmalware-mcp:security-20261124 "scanmalware-mcp:rollback-pre-$REV"
 
 # Build from a staged copy, so the live tree is untouched until the image exists.
 rm -rf "/tmp/deploy-$REV" && mkdir "/tmp/deploy-$REV"
 tar -xzf /tmp/scanmalware-mcp.tar.gz -C "/tmp/deploy-$REV"
-(cd "/tmp/deploy-$REV" && nice docker build -q -t scanmalware-mcp:security-20261107 .)
+(cd "/tmp/deploy-$REV" && nice docker build -q -t scanmalware-mcp:security-20261124 .)
 
 # cp writes into existing files, keeping nginx.conf's inode: it is a single-file
 # bind mount, and a replaced file would be invisible to the running container.
@@ -1027,7 +1038,7 @@ mcpssh <<'SH'
 set -euo pipefail
 cd /opt/scanmalware-mcp
 REV=<short commit id>
-docker tag "scanmalware-mcp:rollback-pre-$REV" scanmalware-mcp:security-20261107
+docker tag "scanmalware-mcp:rollback-pre-$REV" scanmalware-mcp:security-20261124
 inode=$(stat -c %i deploy/nginx/nginx.conf)
 # GNU tar on the droplet writes into existing files, keeping the inode.
 tar -xf "/root/deploy-backup-<date>-pre-$REV/files.tar"
@@ -1070,7 +1081,7 @@ Used for the 2026-10-29 and 2026-11-07 releases: all three images are rebuilt
 under a new tag while the old stack keeps serving, then swapped in. Total
 downtime was about 15 seconds, the time the new MCP process takes to start;
 untracked files such as `demo/` survive. The compose file on `main` names the
-new tag, for example `security-20261107`.
+new tag, for example `security-20261124`.
 
 1. Take a droplet snapshot, check `free -m`, and save a copy of the live
    `tools/list` to compare afterwards. If Docker's packages need upgrading, do
