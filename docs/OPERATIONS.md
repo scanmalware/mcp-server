@@ -47,7 +47,7 @@ Host scanmalware-mcp
 - Compose file: `/opt/scanmalware-mcp/deploy/docker-compose.yml`
 - Nginx config: `/opt/scanmalware-mcp/deploy/nginx/nginx.conf`
 - Landing page: `/opt/scanmalware-mcp/deploy/nginx/html/index.html` (English, at `/`) and
-  `html/<code>/index.html` (`en`, `es`, `sv`, `zh-cn`), generated: edit
+  `html/<code>/index.html` (`en`, `de`, `es`, `fr`, `it`, `ja`, `pt-br`, `ru`, `sv`, `tr`, `zh-cn`), generated: edit
   `deploy/nginx/landing/template.html` and `locales/<code>.json`, run
   `python3 deploy/nginx/landing/build.py`, commit the result
   (`tests/maintenance/test_landing_page.py` fails on a stale page). A new language is one

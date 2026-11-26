@@ -3,40 +3,180 @@
   <url>
     <loc>https://mcp.scanmalware.com/</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
     <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
     <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
   </url>
   <url>
     <loc>https://mcp.scanmalware.com/en/</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
     <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
     <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
+  </url>
+  <url>
+    <loc>https://mcp.scanmalware.com/de/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
   </url>
   <url>
     <loc>https://mcp.scanmalware.com/es/</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
     <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
     <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
+  </url>
+  <url>
+    <loc>https://mcp.scanmalware.com/fr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
+  </url>
+  <url>
+    <loc>https://mcp.scanmalware.com/it/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
+  </url>
+  <url>
+    <loc>https://mcp.scanmalware.com/ja/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
+  </url>
+  <url>
+    <loc>https://mcp.scanmalware.com/pt-br/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
+  </url>
+  <url>
+    <loc>https://mcp.scanmalware.com/ru/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
   </url>
   <url>
     <loc>https://mcp.scanmalware.com/sv/</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
     <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
     <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
+    <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
+  </url>
+  <url>
+    <loc>https://mcp.scanmalware.com/tr/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
+    <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
+    <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
   </url>
   <url>
     <loc>https://mcp.scanmalware.com/zh-cn/</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://mcp.scanmalware.com/en/"/>
+    <xhtml:link rel="alternate" hreflang="de" href="https://mcp.scanmalware.com/de/"/>
     <xhtml:link rel="alternate" hreflang="es" href="https://mcp.scanmalware.com/es/"/>
+    <xhtml:link rel="alternate" hreflang="fr" href="https://mcp.scanmalware.com/fr/"/>
+    <xhtml:link rel="alternate" hreflang="it" href="https://mcp.scanmalware.com/it/"/>
+    <xhtml:link rel="alternate" hreflang="ja" href="https://mcp.scanmalware.com/ja/"/>
+    <xhtml:link rel="alternate" hreflang="pt-BR" href="https://mcp.scanmalware.com/pt-br/"/>
+    <xhtml:link rel="alternate" hreflang="ru" href="https://mcp.scanmalware.com/ru/"/>
     <xhtml:link rel="alternate" hreflang="sv" href="https://mcp.scanmalware.com/sv/"/>
+    <xhtml:link rel="alternate" hreflang="tr" href="https://mcp.scanmalware.com/tr/"/>
     <xhtml:link rel="alternate" hreflang="zh-CN" href="https://mcp.scanmalware.com/zh-cn/"/>
     <xhtml:link rel="alternate" hreflang="x-default" href="https://mcp.scanmalware.com/"/>
   </url>
